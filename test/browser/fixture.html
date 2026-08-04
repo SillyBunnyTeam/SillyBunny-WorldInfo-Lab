@@ -6,16 +6,88 @@
     <title>World Info Lab fixture</title>
     <link rel="stylesheet" href="/style.css">
     <style>
+        :root {
+            --SmartThemeBlurTintColor: #202628;
+            --SmartThemeChatTintColor: #282f31;
+            --SmartThemeBotMesBlurTintColor: #30383a;
+            --SmartThemeBodyColor: #e4e9e7;
+            --SmartThemeEmColor: #aeb9b5;
+            --SmartThemeBorderColor: #596462;
+            --SmartThemeQuoteColor: #91b9a8;
+        }
+        body { min-height: 100vh; margin: 0; background: #151a1b; color: #e4e9e7; font-family: sans-serif; }
+        #extensionsMenu { min-height: 44px; padding: 8px; }
+        #extensions-settings-button > .drawer-toggle { margin: 0 8px 8px; }
+        #fixture-extension-shell { width: min(760px, 100%); max-height: calc(100vh - 100px); margin-left: auto; overflow-y: auto; }
+        #extensions_settings2 { padding: 8px; }
         .text_pole { margin: 5px 0; }
         .menu_button { margin: 4px 0; }
     </style>
 </head>
 <body>
     <nav id="extensionsMenu"></nav>
-    <main id="extensions_settings2"></main>
+    <section id="extensions-settings-button" class="drawer">
+        <button class="drawer-toggle" type="button">Extensions</button>
+        <div id="fixture-extension-shell" class="sb-shell-panel-scroller" hidden>
+            <main id="extensions_settings2"></main>
+        </div>
+    </section>
     <script type="module">
         import { deactivate, init } from '/index.js';
         import { __setHostForTests } from '/src/host.js';
+
+        const shellPanel = document.getElementById('fixture-extension-shell');
+        const shellCalls = [];
+        let fallbackClicks = 0;
+        let popupCalls = 0;
+        let drawerAnimation = 0;
+
+        function showExtensions() {
+            shellPanel.hidden = false;
+        }
+
+        const shellApi = {
+            openTab(side, tab) {
+                shellCalls.push([side, tab]);
+                if (side === 'right' && tab === 'extensions') {
+                    showExtensions();
+                }
+            },
+        };
+        globalThis.SillyBunnyShell = shellApi;
+
+        document.querySelector('#extensions-settings-button > .drawer-toggle').addEventListener('click', () => {
+            fallbackClicks += 1;
+            shellPanel.hidden = !shellPanel.hidden;
+        });
+        document.addEventListener('click', (event) => {
+            const toggle = event.target.closest('.inline-drawer-toggle');
+            if (!(toggle instanceof HTMLElement)) {
+                return;
+            }
+            const drawer = toggle.closest('.inline-drawer');
+            const icon = drawer?.querySelector(':scope > .inline-drawer-header .inline-drawer-icon');
+            const content = drawer?.querySelector(':scope > .inline-drawer-content');
+            if (!(drawer instanceof HTMLElement) || !(icon instanceof HTMLElement) || !(content instanceof HTMLElement)) {
+                return;
+            }
+            const expand = icon.classList.contains('down');
+            icon.classList.toggle('down', !expand);
+            icon.classList.toggle('up', expand);
+            icon.classList.toggle('fa-circle-chevron-down', !expand);
+            icon.classList.toggle('fa-circle-chevron-up', expand);
+            content.style.display = expand ? 'block' : 'none';
+            drawer.dispatchEvent(new CustomEvent('inline-drawer-toggle', { bubbles: true }));
+            if (expand && drawerAnimation > 0) {
+                content.animate([
+                    { height: '0px', overflow: 'hidden' },
+                    { height: `${content.scrollHeight}px`, overflow: 'hidden' },
+                ], {
+                    duration: drawerAnimation,
+                    easing: 'linear',
+                });
+            }
+        });
 
         const settings = {
             world_info_depth: 2,
@@ -59,32 +131,10 @@
             },
         };
 
-        class FixturePopup {
-            constructor(content, type, title, options) {
-                this.options = options;
-                this.dlg = document.createElement('dialog');
-                this.dlg.className = 'wide_dialogue_popup large_dialogue_popup';
-                const body = document.createElement('div');
-                body.className = 'popup-body';
-                const popupContent = document.createElement('div');
-                popupContent.className = 'popup-content';
-                popupContent.append(content);
-                body.append(popupContent);
-                this.dlg.append(body);
-                document.body.append(this.dlg);
-            }
-
-            show() {
-                this.dlg.open = true;
-                return new Promise(resolve => {
-                    this.resolve = resolve;
-                });
-            }
-
-            async completeCancelled() {
-                await this.options.onClosing?.();
-                this.dlg.remove();
-                this.resolve?.(null);
+        class ForbiddenPopup {
+            constructor() {
+                popupCalls += 1;
+                throw new Error('The embedded workbench must not create a popup.');
             }
         }
 
@@ -132,7 +182,7 @@
             maxContext: 4096,
             name1: 'User',
             name2: 'Tester',
-            Popup: FixturePopup,
+            Popup: ForbiddenPopup,
             POPUP_TYPE: { TEXT: 'text' },
             powerUserSettings: {},
             tagMap: {},
@@ -191,6 +241,15 @@
 
         globalThis.fixtureDeactivate = deactivate;
         globalThis.fixtureEmit = (...args) => eventSource.emit(...args);
+        globalThis.fixtureGetRouting = () => ({
+            shellCalls: structuredClone(shellCalls),
+            fallbackClicks,
+            popupCalls,
+        });
+        globalThis.fixtureCloseShell = () => { shellPanel.hidden = true; };
+        globalThis.fixtureOpenShell = showExtensions;
+        globalThis.fixtureRemoveShellApi = () => { delete globalThis.SillyBunnyShell; };
+        globalThis.fixtureSetDrawerAnimation = value => { drawerAnimation = Number(value) || 0; };
         globalThis.fixtureSetLoadDelay = value => { loadDelay = Number(value) || 0; };
         globalThis.fixtureSetTagMap = value => { context.tagMap = structuredClone(value); };
         init();

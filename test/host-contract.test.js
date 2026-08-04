@@ -19,7 +19,7 @@ test('SillyBunny exposes the host contracts used by World Info Lab', {
     skip: !(await available()) && !process.env.WI_LAB_REQUIRE_HOST,
 }, async () => {
     assert.equal(await available(), true, `SillyBunny checkout not found at ${hostRoot}`);
-    const [worldInfo, scanCore, scanChat, characterBook, utils, context, script, popup, events] = await Promise.all([
+    const [worldInfo, scanCore, scanChat, characterBook, utils, context, script, tabs, keyboard, indexHtml, events] = await Promise.all([
         readFile(path.join(hostRoot, 'public/scripts/world-info.js'), 'utf8'),
         readFile(path.join(hostRoot, 'public/scripts/world-info-scan-core.js'), 'utf8'),
         readFile(path.join(hostRoot, 'public/scripts/world-info-scan-chat.js'), 'utf8'),
@@ -27,7 +27,9 @@ test('SillyBunny exposes the host contracts used by World Info Lab', {
         readFile(path.join(hostRoot, 'public/scripts/utils.js'), 'utf8'),
         readFile(path.join(hostRoot, 'public/scripts/st-context.js'), 'utf8'),
         readFile(path.join(hostRoot, 'public/script.js'), 'utf8'),
-        readFile(path.join(hostRoot, 'public/scripts/popup.js'), 'utf8'),
+        readFile(path.join(hostRoot, 'public/scripts/sillybunny-tabs.js'), 'utf8'),
+        readFile(path.join(hostRoot, 'public/scripts/keyboard.js'), 'utf8'),
+        readFile(path.join(hostRoot, 'public/index.html'), 'utf8'),
         readFile(path.join(hostRoot, 'public/scripts/events.js'), 'utf8'),
     ]);
 
@@ -55,7 +57,15 @@ test('SillyBunny exposes the host contracts used by World Info Lab', {
     for (const api of ['getRequestHeaders', 'getWorldInfoNames', 'loadWorldInfo', 'saveWorldInfo', 'reloadWorldInfoEditor', 'updateWorldInfoList']) {
         assert.match(context, new RegExp(`\\b${api}\\b`));
     }
-    assert.match(popup, /this\.dlg\s*=/);
+    assert.match(indexHtml, /id="extensions-settings-button"/);
+    assert.match(indexHtml, /id="extensions_settings2"/);
+    assert.match(script, /\.inline-drawer-toggle/);
+    assert.match(script, /\.inline-drawer-content/);
+    assert.match(script, /inline-drawer-toggle', \{ bubbles: true \}/);
+    assert.match(tabs, /globalThis\.SillyBunnyShell/);
+    assert.match(tabs, /openTab\(shellKey, tabId\)/);
+    assert.match(keyboard, /'\.inline-drawer-icon'/);
+    assert.match(keyboard, /NOT_FOCUSABLE_CONTROL_CLASS\s*=\s*'not_focusable'/);
     for (const event of [
         'APP_READY',
         'WORLDINFO_UPDATED',

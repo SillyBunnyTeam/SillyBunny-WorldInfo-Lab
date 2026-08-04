@@ -9,6 +9,23 @@ function settingsHost() {
         ?? document.getElementById('extensions_settings');
 }
 
+function openExtensionsSurface() {
+    if (typeof globalThis.SillyBunnyShell?.openTab === 'function') {
+        globalThis.SillyBunnyShell.openTab('right', 'extensions');
+        return;
+    }
+    const toggle = document.querySelector('#extensions-settings-button > .drawer-toggle');
+    const host = settingsHost();
+    const hostIsVisible = host instanceof HTMLElement && host.getClientRects().length > 0;
+    if (!hostIsVisible && toggle instanceof HTMLElement) {
+        toggle.dispatchEvent(new MouseEvent('click', {
+            bubbles: true,
+            cancelable: true,
+            view: window,
+        }));
+    }
+}
+
 export function mountRuntimeUi({ signal = null } = {}) {
     if (mounted) {
         mounted.refresh('remount');
@@ -16,10 +33,17 @@ export function mountRuntimeUi({ signal = null } = {}) {
     }
 
     let menuItem = null;
+    let settingsRoot = null;
     let settingsDrawer = null;
+    let drawerToggle = null;
+    let drawerIcon = null;
+    let drawerContent = null;
+    let drawerObserver = null;
     let drawerStatus = null;
     let drawerResult = null;
     let historyLimitInput = null;
+    let workbenchMount = null;
+    let revealSequence = 0;
     let disposed = false;
     let workbench = null;
 
@@ -62,6 +86,59 @@ export function mountRuntimeUi({ signal = null } = {}) {
         onStateChange: updateDrawer,
     });
 
+    function syncDrawerAccessibility() {
+        const expanded = Boolean(drawerIcon && !drawerIcon.classList.contains('down'));
+        drawerToggle?.setAttribute('aria-expanded', String(expanded));
+        drawerContent?.setAttribute('aria-hidden', String(!expanded));
+    }
+
+    function revealWorkbench() {
+        if (disposed) {
+            return;
+        }
+        ensureSettingsDrawer();
+        openExtensionsSurface();
+        if (!settingsDrawer?.isConnected || !workbenchMount) {
+            return;
+        }
+        const root = workbench.mount(workbenchMount);
+        if (!root) {
+            return;
+        }
+        if (drawerIcon?.classList.contains('down')) {
+            drawerToggle?.click();
+        }
+        syncDrawerAccessibility();
+        const sequence = ++revealSequence;
+        const startedAt = performance.now();
+        let previousHeight = -1;
+        let stableFrames = 0;
+        const focusWhenSettled = () => {
+            if (disposed || sequence !== revealSequence || !root.isConnected) {
+                return;
+            }
+            const height = drawerContent?.getBoundingClientRect().height ?? 0;
+            stableFrames = Math.abs(height - previousHeight) < 0.5 ? stableFrames + 1 : 0;
+            previousHeight = height;
+            if ((height <= 0 || stableFrames < 2) && performance.now() - startedAt < 650) {
+                requestAnimationFrame(focusWhenSettled);
+                return;
+            }
+            const scroller = root.closest('.sb-shell-panel-scroller, .scrollableInner, .scrollableInnerFull');
+            if (scroller && typeof scroller.scrollTo === 'function') {
+                const offset = root.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
+                scroller.scrollTo({
+                    top: Math.max(0, scroller.scrollTop + offset - 8),
+                    behavior: 'auto',
+                });
+            } else {
+                root.scrollIntoView({ block: 'start', inline: 'nearest' });
+            }
+            workbench.focus();
+        };
+        requestAnimationFrame(focusWhenSettled);
+    }
+
     function ensureMenuItem() {
         if (menuItem?.isConnected) {
             return;
@@ -85,36 +162,60 @@ export function mountRuntimeUi({ signal = null } = {}) {
             attributes: { 'aria-hidden': 'true' },
         });
         menuItem.append(icon, element('span', { text: 'World Info Lab' }));
-        menuItem.addEventListener('click', () => {
-            void workbench.open(menuItem);
-        });
+        menuItem.addEventListener('click', revealWorkbench);
         host.append(menuItem);
     }
 
     function ensureSettingsDrawer() {
-        if (settingsDrawer?.isConnected) {
+        if (settingsRoot?.isConnected && settingsDrawer?.isConnected && settingsRoot.contains(settingsDrawer)) {
             return;
         }
         const host = settingsHost();
         if (!host) {
             return;
         }
-        document.getElementById('sbwil-settings')?.remove();
+        drawerObserver?.disconnect();
+        settingsRoot?.remove();
+        const staleDrawer = document.getElementById('sbwil-settings');
+        (staleDrawer?.closest('.extension_container') ?? staleDrawer)?.remove();
 
-        settingsDrawer = element('details', {
+        settingsRoot = element('div', {
+            className: 'extension_container sbwil-settings-container',
+        });
+        settingsDrawer = element('div', {
             id: 'sbwil-settings',
-            className: 'extension_container sbwil-settings',
+            className: 'inline-drawer sbwil-settings',
             attributes: {
                 'data-extension-name': 'SillyBunny-WorldInfo-Lab',
+                'data-sb-drawer-persistence': 'off',
             },
         });
-        const summary = element('summary', { className: 'sbwil-settings-summary' });
-        summary.append(
-            element('span', { text: 'World Info Lab' }),
+        drawerToggle = element('button', {
+            className: 'inline-drawer-toggle inline-drawer-header sbwil-settings-summary',
+            attributes: {
+                type: 'button',
+                'aria-controls': 'sbwil-settings-content',
+                'aria-expanded': 'false',
+            },
+        });
+        const summaryCopy = element('span', { className: 'sbwil-settings-summary-copy' });
+        summaryCopy.append(
+            element('strong', { text: 'World Info Lab' }),
             element('span', { className: 'sbwil-settings-summary-note', text: 'Test and troubleshoot lorebooks' }),
         );
+        drawerIcon = element('span', {
+            className: 'inline-drawer-icon fa-solid fa-circle-chevron-down down not_focusable',
+            attributes: { 'aria-hidden': 'true' },
+        });
+        drawerToggle.append(summaryCopy, drawerIcon);
 
-        const content = element('div', { className: 'sbwil-settings-content' });
+        drawerContent = element('div', {
+            id: 'sbwil-settings-content',
+            className: 'inline-drawer-content sbwil-settings-content',
+            attributes: { 'aria-hidden': 'true' },
+        });
+        drawerContent.style.display = 'none';
+        const settingsBody = element('div', { className: 'sbwil-settings-body' });
         drawerStatus = element('p', {
             className: 'sbwil-settings-status',
             attributes: {
@@ -145,11 +246,9 @@ export function mountRuntimeUi({ signal = null } = {}) {
             text: 'Open World Info Lab',
             attributes: { type: 'button' },
         });
-        openButton.addEventListener('click', () => {
-            void workbench.open(openButton);
-        });
+        openButton.addEventListener('click', revealWorkbench);
 
-        content.append(
+        settingsBody.append(
             drawerStatus,
             drawerResult,
             field('Recent scan history limit', historyLimitInput, {
@@ -165,8 +264,20 @@ export function mountRuntimeUi({ signal = null } = {}) {
                 text: 'Saved tests are stored inside a lorebook and may contain private chat, character, and persona data. Delete private tests before sharing the lorebook. Cleaning World Info Lab data does not delete them.',
             }),
         );
-        settingsDrawer.append(summary, content);
-        host.append(settingsDrawer);
+        workbenchMount = element('div', { className: 'sbwil-workbench-mount' });
+        drawerContent.append(settingsBody, workbenchMount);
+        settingsDrawer.append(drawerToggle, drawerContent);
+        settingsRoot.append(settingsDrawer);
+        host.append(settingsRoot);
+        drawerObserver = new MutationObserver(syncDrawerAccessibility);
+        drawerObserver.observe(drawerIcon, {
+            attributes: true,
+            attributeFilter: ['class'],
+        });
+        if (workbench.getState().open) {
+            workbench.mount(workbenchMount);
+        }
+        syncDrawerAccessibility();
         updateDrawer();
     }
 
@@ -196,16 +307,25 @@ export function mountRuntimeUi({ signal = null } = {}) {
                 return;
             }
             disposed = true;
+            revealSequence += 1;
+            drawerObserver?.disconnect();
             workbench.dispose();
             menuItem?.remove();
-            settingsDrawer?.remove();
+            settingsRoot?.remove();
             document.getElementById('sbwil-menu-item')?.remove();
-            document.getElementById('sbwil-settings')?.remove();
+            const staleDrawer = document.getElementById('sbwil-settings');
+            (staleDrawer?.closest('.extension_container') ?? staleDrawer)?.remove();
             menuItem = null;
+            settingsRoot = null;
             settingsDrawer = null;
+            drawerToggle = null;
+            drawerIcon = null;
+            drawerContent = null;
+            drawerObserver = null;
             drawerStatus = null;
             drawerResult = null;
             historyLimitInput = null;
+            workbenchMount = null;
         },
     };
 

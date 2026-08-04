@@ -36,10 +36,15 @@ No server plugin or build step is needed.
 ## First scan
 
 1. Open the wand menu and choose **World Info Lab**.
-2. Leave **Current chat** selected.
-3. Choose **Run scan**.
-4. Look at **Activated entries** to see which entries passed their scan rules.
-5. Open **Trace** to see why every other entry was skipped.
+2. SillyBunny opens **Extensions** and expands the World Info Lab drawer.
+3. Leave **Current chat** selected.
+4. Choose **Run scan**.
+5. Look at **Activated entries** to see which entries passed their scan rules.
+6. Open **Trace** to see why every other entry was skipped.
+
+You can also open **Extensions**, expand **World Info Lab**, and choose **Open World Info Lab**. Both
+launchers use the same workbench inside the Extensions drawer. Closing and reopening the outer drawer
+keeps the current workbench session and results.
 
 You can also choose **Pasted text** to test a sentence without adding it to your chat.
 

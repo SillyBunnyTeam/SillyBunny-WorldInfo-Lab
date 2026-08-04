@@ -548,20 +548,10 @@ function renderTrace(container, result, stale) {
     container.append(layout);
 }
 
-async function popupApi() {
-    const context = getContext();
-    if (context?.Popup && context?.POPUP_TYPE) {
-        return { Popup: context.Popup, POPUP_TYPE: context.POPUP_TYPE };
-    }
-    throw new Error('The popup API is unavailable.');
-}
-
 export function createWorkbench({
     lifetimeSignal = null,
     onStateChange = () => {},
 } = {}) {
-    let popup = null;
-    let openPromise = null;
     let session = null;
     let destroyed = false;
     let latestResult = null;
@@ -575,7 +565,7 @@ export function createWorkbench({
             latestResult,
             latestSnapshot,
             stale,
-            open: Boolean(popup),
+            open: Boolean(session),
         };
     }
 
@@ -1070,84 +1060,47 @@ export function createWorkbench({
         };
     }
 
-    async function openOnce(opener) {
-        const restoreTarget = opener instanceof HTMLElement
-            ? opener
-            : (document.activeElement instanceof HTMLElement ? document.activeElement : null);
-        let api;
-        try {
-            api = await popupApi();
-        } catch (error) {
-            notify('error', `World Info Lab could not open. Reload SillyBunny and try again. Technical details: ${errorMessage(error)}`);
-            return;
+    function mount(target) {
+        if (destroyed || !(target instanceof HTMLElement)) {
+            return null;
         }
-        if (destroyed) {
-            return;
+        session ??= buildSession();
+        if (session.root.parentElement !== target) {
+            target.append(session.root);
         }
-
-        session = buildSession();
-        const type = api.POPUP_TYPE.TEXT ?? api.POPUP_TYPE.DISPLAY;
-        try {
-            popup = new api.Popup(session.root, type, '', {
-                wide: true,
-                large: true,
-                leftAlign: true,
-                allowVerticalScrolling: false,
-                okButton: 'Close',
-                cancelButton: false,
-                animation: false,
-                onClosing: () => {
-                    session?.dispose();
-                    return true;
-                },
-            });
-            popup.dlg.id = 'sbwil-workbench-dialog';
-            popup.dlg.classList.add('sbwil-popup');
-            popup.dlg.setAttribute('aria-label', 'World Info Lab workbench');
-            emitState();
-            const shown = popup.show();
-            queueMicrotask(() => session?.focusActiveTab());
-            await shown;
-        } catch (error) {
-            if (!destroyed) {
-                notify('error', `World Info Lab could not open. Reload SillyBunny and try again. Technical details: ${errorMessage(error)}`);
-            }
-        } finally {
-            session?.dispose();
-            session = null;
-            popup = null;
-            emitState();
-            if (restoreTarget?.isConnected) {
-                queueMicrotask(() => restoreTarget.focus({ preventScroll: true }));
-            }
-        }
+        emitState();
+        return session.root;
     }
 
-    function open(opener = null) {
-        if (openPromise) {
-            session?.focusActiveTab();
-            return openPromise;
-        }
-        const promise = openOnce(opener).finally(() => {
-            if (openPromise === promise) {
-                openPromise = null;
-            }
-        });
-        openPromise = promise;
-        return promise;
+    function focus() {
+        session?.focusActiveTab();
     }
 
     function close() {
-        session?.dispose();
-        void popup?.completeCancelled?.();
+        if (!session) {
+            return;
+        }
+        const closingSession = session;
+        session = null;
+        closingSession.dispose();
+        closingSession.root.remove();
+        emitState();
     }
 
-    if (lifetimeSignal) {
-        lifetimeSignal.addEventListener('abort', close, { once: true });
+    function abortLifetime() {
+        destroyed = true;
+        close();
+    }
+
+    if (lifetimeSignal?.aborted) {
+        abortLifetime();
+    } else if (lifetimeSignal) {
+        lifetimeSignal.addEventListener('abort', abortLifetime, { once: true });
     }
 
     return {
-        open,
+        mount,
+        focus,
         close,
         refresh(reason) {
             const message = staleMessage(reason);
@@ -1171,6 +1124,7 @@ export function createWorkbench({
                 return;
             }
             destroyed = true;
+            lifetimeSignal?.removeEventListener('abort', abortLifetime);
             close();
         },
     };

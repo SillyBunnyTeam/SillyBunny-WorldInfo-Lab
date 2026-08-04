@@ -7,6 +7,88 @@ async function openWorkbench(page) {
     await expect(page.locator('#sbwil-workbench')).toBeVisible();
 }
 
+test('routes the wand launcher into one native Extensions drawer session', async ({ page }) => {
+    await openWorkbench(page);
+    await expect(page.locator('#fixture-extension-shell')).toBeVisible();
+    await expect(page.locator('.sbwil-settings-summary')).toHaveAttribute('aria-expanded', 'true');
+    await expect(page.locator('#sbwil-settings-content')).toHaveAttribute('aria-hidden', 'false');
+    await expect(page.locator('#sbwil-workbench')).toHaveCount(1);
+
+    await page.locator('#sbwil-menu-item').click();
+    await expect(page.locator('#sbwil-workbench')).toHaveCount(1);
+    const routing = await page.evaluate(() => globalThis.fixtureGetRouting());
+    expect(routing.shellCalls).toEqual([
+        ['right', 'extensions'],
+        ['right', 'extensions'],
+    ]);
+    expect(routing.fallbackClicks).toBe(0);
+    expect(routing.popupCalls).toBe(0);
+    await expect(page.locator('dialog')).toHaveCount(0);
+});
+
+test('opens the same embedded workbench from the drawer button', async ({ page }) => {
+    await page.goto('/');
+    await page.evaluate(() => globalThis.fixtureOpenShell());
+    await page.locator('.sbwil-settings-summary').click();
+    await expect(page.locator('#sbwil-workbench')).toHaveCount(0);
+    await page.locator('.sbwil-settings-open').click();
+    await expect(page.locator('#sbwil-workbench')).toBeVisible();
+    const routing = await page.evaluate(() => globalThis.fixtureGetRouting());
+    expect(routing.shellCalls).toEqual([['right', 'extensions']]);
+    expect(routing.popupCalls).toBe(0);
+});
+
+test('falls back to the native Extensions toggle when the shell API is unavailable', async ({ page }) => {
+    await page.goto('/');
+    await page.evaluate(() => globalThis.fixtureRemoveShellApi());
+    await page.locator('#sbwil-menu-item').click();
+    await expect(page.locator('#fixture-extension-shell')).toBeVisible();
+    await expect(page.locator('#sbwil-workbench')).toBeVisible();
+    const routing = await page.evaluate(() => globalThis.fixtureGetRouting());
+    expect(routing.shellCalls).toEqual([]);
+    expect(routing.fallbackClicks).toBe(1);
+    expect(routing.popupCalls).toBe(0);
+});
+
+test('does not close an already-open legacy Extensions surface', async ({ page }) => {
+    await page.goto('/');
+    await page.evaluate(() => globalThis.fixtureRemoveShellApi());
+    await page.locator('#extensions-settings-button > .drawer-toggle').click();
+    await page.locator('.sbwil-settings-summary').click();
+    await page.locator('.sbwil-settings-open').click();
+    await expect(page.locator('#fixture-extension-shell')).toBeVisible();
+    await expect(page.locator('#sbwil-workbench')).toBeVisible();
+    const routing = await page.evaluate(() => globalThis.fixtureGetRouting());
+    expect(routing.fallbackClicks).toBe(1);
+});
+
+test('waits for drawer expansion before focusing and scrolling the workbench', async ({ page }) => {
+    await page.goto('/');
+    await page.evaluate(() => globalThis.fixtureSetDrawerAnimation(180));
+    await page.locator('#sbwil-menu-item').click();
+    await expect(page.locator('#sbwil-tab-scan')).toBeFocused();
+    const bounds = await page.evaluate(() => {
+        const shell = document.getElementById('fixture-extension-shell').getBoundingClientRect();
+        const workbench = document.getElementById('sbwil-workbench').getBoundingClientRect();
+        return { shellTop: shell.top, shellBottom: shell.bottom, workbenchTop: workbench.top };
+    });
+    expect(bounds.workbenchTop).toBeGreaterThanOrEqual(bounds.shellTop - 1);
+    expect(bounds.workbenchTop).toBeLessThan(bounds.shellBottom);
+});
+
+test('preserves the embedded session while the outer shell is closed', async ({ page }) => {
+    await openWorkbench(page);
+    await page.getByRole('button', { name: 'Run scan' }).click();
+    await expect(page.getByText('Scan complete: 2 entries activated.')).toBeVisible();
+    await page.evaluate(() => globalThis.fixtureCloseShell());
+    await expect(page.locator('#sbwil-workbench')).toBeHidden();
+    await expect(page.locator('#sbwil-workbench')).toHaveCount(1);
+
+    await page.locator('#sbwil-menu-item').click();
+    await expect(page.getByText('Scan complete: 2 entries activated.')).toBeVisible();
+    await expect(page.locator('#sbwil-workbench')).toHaveCount(1);
+});
+
 test('runs a scan and renders clear trace stages', async ({ page }) => {
     await openWorkbench(page);
     await expect(page.getByLabel('Text to scan')).toBeHidden();
@@ -22,12 +104,29 @@ test('runs a scan and renders clear trace stages', async ({ page }) => {
 test('mounts dedupe-safe settings and exposes batch field mode', async ({ page }) => {
     await openWorkbench(page);
     const settings = page.locator('#sbwil-settings');
-    await expect(settings).toHaveClass(/extension_container/);
+    await expect(settings).toHaveClass(/inline-drawer/);
     await expect(settings).toHaveAttribute('data-extension-name', 'SillyBunny-WorldInfo-Lab');
+    await expect(settings.locator('xpath=..')).toHaveClass(/extension_container/);
+    await expect(settings.locator(':scope > .inline-drawer-toggle.inline-drawer-header')).toHaveCount(1);
+    await expect(settings.locator(':scope > .inline-drawer-content')).toHaveCount(1);
+    await expect(settings.locator('.inline-drawer-icon')).toHaveClass(/not_focusable/);
     await page.getByRole('tab', { name: 'Batch Edit' }).click();
     await page.getByLabel('Edit type').selectOption('set-field');
     await expect(page.getByLabel('Entry setting')).toBeVisible();
     await expect(page.getByLabel('New setting value')).toBeVisible();
+});
+
+test('recovers if host deduplication removes the owned inline drawer', async ({ page }) => {
+    await openWorkbench(page);
+    await page.evaluate(async () => {
+        document.getElementById('sbwil-settings').remove();
+        await globalThis.fixtureEmit('worldinfo-updated');
+    });
+    await expect(page.locator('#sbwil-settings')).toHaveCount(1);
+    await expect(page.locator('.sbwil-settings-container')).toHaveCount(1);
+    await expect(page.locator('#sbwil-workbench')).toHaveCount(1);
+    await page.locator('#sbwil-menu-item').click();
+    await expect(page.locator('#sbwil-workbench')).toBeVisible();
 });
 
 test('aligns the saved-test form as one clear action flow', async ({ page }) => {
@@ -125,7 +224,9 @@ test('invalidates results on message edits and tears down through the extension 
     await page.evaluate(() => globalThis.fixtureDeactivate());
     await expect(page.locator('#sbwil-menu-item')).toHaveCount(0);
     await expect(page.locator('#sbwil-settings')).toHaveCount(0);
-    await expect(page.locator('#sbwil-workbench-dialog')).toHaveCount(0);
+    await expect(page.locator('.sbwil-settings-container')).toHaveCount(0);
+    await expect(page.locator('#sbwil-workbench')).toHaveCount(0);
+    await expect(page.locator('dialog')).toHaveCount(0);
 });
 
 test('invalidates results when character tag assignments change', async ({ page }) => {
@@ -157,6 +258,20 @@ test('invalidates local control changes and cancels in-flight scans', async ({ p
     await expect(page.getByText('Scan input changed. Run the scan again.')).toBeVisible();
     await page.waitForTimeout(250);
     await expect(page.getByText('Scan complete: 2 entries activated.')).toHaveCount(0);
+});
+
+test('aborts an in-flight scan during extension teardown', async ({ page }) => {
+    await openWorkbench(page);
+    await page.getByRole('radio', { name: 'Pasted text' }).check();
+    await page.getByLabel('Text to scan').fill('dragon');
+    await page.evaluate(() => globalThis.fixtureSetLoadDelay(500));
+    await page.getByRole('button', { name: 'Run scan' }).click();
+    await expect(page.getByRole('button', { name: 'Cancel scan' })).toBeVisible();
+    await page.evaluate(() => globalThis.fixtureDeactivate());
+    await expect(page.locator('#sbwil-workbench')).toHaveCount(0);
+    await expect(page.locator('#sbwil-settings')).toHaveCount(0);
+    await page.waitForTimeout(550);
+    await expect(page.locator('#sbwil-workbench')).toHaveCount(0);
 });
 
 test('does not publish a stored-case result after source invalidation', async ({ page }) => {
@@ -197,5 +312,34 @@ test('keeps primary controls usable at mobile width', async ({ page }) => {
     const overflow = await page.locator('#sbwil-workbench').evaluate(node => (
         node.scrollWidth > node.clientWidth + 1
     ));
+    expect(overflow).toBe(false);
+    const scrolling = await page.locator('#fixture-extension-shell').evaluate((shell) => {
+        const workbench = shell.querySelector('#sbwil-workbench');
+        const panel = shell.querySelector('.sbwil-panel:not([hidden])');
+        return {
+            shellOverflow: getComputedStyle(shell).overflowY,
+            shellScrollable: shell.scrollHeight > shell.clientHeight,
+            workbenchOverflow: getComputedStyle(workbench).overflowY,
+            panelOverflow: getComputedStyle(panel).overflowY,
+        };
+    });
+    expect(scrolling.shellOverflow).toBe('auto');
+    expect(scrolling.shellScrollable).toBe(true);
+    expect(scrolling.workbenchOverflow).toBe('visible');
+    expect(scrolling.panelOverflow).toBe('visible');
+});
+
+test('uses the split workbench layout when the Extensions container is wide', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.goto('/');
+    await page.locator('#fixture-extension-shell').evaluate(node => { node.style.width = '1000px'; });
+    await page.locator('#sbwil-menu-item').click();
+    await expect(page.locator('#sbwil-workbench')).toBeVisible();
+    await expect(page.locator('.sbwil-scan-layout')).toHaveCSS('display', 'grid');
+    await page.getByRole('button', { name: 'Run scan' }).click();
+    await expect(page.getByText('Scan complete: 2 entries activated.')).toBeVisible();
+    await page.getByRole('tab', { name: 'Trace' }).click();
+    await expect(page.locator('.sbwil-trace-layout')).toHaveCSS('display', 'grid');
+    const overflow = await page.locator('#sbwil-workbench').evaluate(node => node.scrollWidth > node.clientWidth + 1);
     expect(overflow).toBe(false);
 });
