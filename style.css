@@ -1074,10 +1074,6 @@
     max-width: 110px;
 }
 
-.sbwil-settings-open {
-    justify-self: start;
-}
-
 @media (hover: hover) {
     #sbwil-menu-item:hover,
     .sbwil-tab:hover,
@@ -1250,8 +1246,7 @@
 
     .sbwil-run-actions .sbwil-button,
     .sbwil-action-row .sbwil-button,
-    .sbwil-action-row .sbwil-select,
-    .sbwil-settings-open {
+    .sbwil-action-row .sbwil-select {
         width: 100% !important;
     }
 

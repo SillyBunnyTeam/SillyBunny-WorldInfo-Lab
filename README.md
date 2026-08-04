@@ -42,9 +42,9 @@ No server plugin or build step is needed.
 5. Look at **Activated entries** to see which entries passed their scan rules.
 6. Open **Trace** to see why every other entry was skipped.
 
-You can also open **Extensions**, expand **World Info Lab**, and choose **Open World Info Lab**. Both
-launchers use the same workbench inside the Extensions drawer. Closing and reopening the outer drawer
-keeps the current workbench session and results.
+You can also open **Extensions** and expand **World Info Lab** to reach the same workbench inside the
+Extensions drawer. Closing and reopening the outer drawer keeps the current workbench session and
+results.
 
 You can also choose **Pasted text** to test a sentence without adding it to your chat.
 

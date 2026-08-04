@@ -90,6 +90,9 @@ export function mountRuntimeUi({ signal = null } = {}) {
         const expanded = Boolean(drawerIcon && !drawerIcon.classList.contains('down'));
         drawerToggle?.setAttribute('aria-expanded', String(expanded));
         drawerContent?.setAttribute('aria-hidden', String(!expanded));
+        if (expanded && workbenchMount && !disposed) {
+            workbench.mount(workbenchMount);
+        }
     }
 
     function alignWorkbench(root) {
@@ -119,7 +122,11 @@ export function mountRuntimeUi({ signal = null } = {}) {
             return;
         }
         if (drawerIcon?.classList.contains('down')) {
-            drawerToggle?.click();
+            drawerIcon.classList.remove('down');
+            drawerIcon.classList.add('up');
+            drawerIcon.classList.replace('fa-circle-chevron-down', 'fa-circle-chevron-up');
+            drawerContent.style.display = 'block';
+            settingsDrawer.dispatchEvent(new CustomEvent('inline-drawer-toggle', { bubbles: true }));
         }
         syncDrawerAccessibility();
         const sequence = ++revealSequence;
@@ -254,20 +261,12 @@ export function mountRuntimeUi({ signal = null } = {}) {
             historyLimitInput.value = String(settings.historyLimit);
         });
 
-        const openButton = element('button', {
-            className: 'menu_button sbwil-button sbwil-button-primary sbwil-settings-open',
-            text: 'Open World Info Lab',
-            attributes: { type: 'button' },
-        });
-        openButton.addEventListener('click', revealWorkbench);
-
         settingsBody.append(
             drawerStatus,
             drawerResult,
             field('Recent scan history limit', historyLimitInput, {
                 hint: 'Number of summary-only scans to keep for this account (10 to 500). Chat and lorebook content are not stored.',
             }),
-            openButton,
             element('p', {
                 className: 'sbwil-settings-note',
                 text: 'Running a scan does not send a message or edit a lorebook. Lorebooks change only when you save a test or apply a batch edit.',

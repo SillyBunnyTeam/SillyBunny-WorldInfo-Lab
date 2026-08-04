@@ -26,15 +26,13 @@ test('routes the wand launcher into one native Extensions drawer session', async
     await expect(page.locator('dialog')).toHaveCount(0);
 });
 
-test('opens the same embedded workbench from the drawer button', async ({ page }) => {
+test('expanding the drawer mounts the embedded workbench without a shell call', async ({ page }) => {
     await page.goto('/');
     await page.evaluate(() => globalThis.fixtureOpenShell());
     await page.locator('.sbwil-settings-summary').click();
-    await expect(page.locator('#sbwil-workbench')).toHaveCount(0);
-    await page.locator('.sbwil-settings-open').click();
     await expect(page.locator('#sbwil-workbench')).toBeVisible();
     const routing = await page.evaluate(() => globalThis.fixtureGetRouting());
-    expect(routing.shellCalls).toEqual([['right', 'extensions']]);
+    expect(routing.shellCalls).toEqual([]);
     expect(routing.popupCalls).toBe(0);
 });
 
@@ -54,8 +52,7 @@ test('does not close an already-open legacy Extensions surface', async ({ page }
     await page.goto('/');
     await page.evaluate(() => globalThis.fixtureRemoveShellApi());
     await page.locator('#extensions-settings-button > .drawer-toggle').click();
-    await page.locator('.sbwil-settings-summary').click();
-    await page.locator('.sbwil-settings-open').click();
+    await page.locator('#sbwil-menu-item').click();
     await expect(page.locator('#fixture-extension-shell')).toBeVisible();
     await expect(page.locator('#sbwil-workbench')).toBeVisible();
     const routing = await page.evaluate(() => globalThis.fixtureGetRouting());
