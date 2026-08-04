@@ -176,9 +176,11 @@ test('aligns the saved-test form as one clear action flow', async ({ page }) => 
                 marginBottom: Number.parseFloat(style.marginBottom),
             };
         });
+        const firstButton = buttons[0].box;
         return buttons.map(button => ({
-            topDifference: Math.abs(button.box.top - select.top),
-            bottomDifference: Math.abs(button.box.bottom - select.bottom),
+            topDifference: Math.abs(button.box.top - firstButton.top),
+            bottomDifference: Math.abs(button.box.bottom - firstButton.bottom),
+            belowSelect: button.box.top >= select.bottom,
             buttonMarginTop: button.marginTop,
             buttonMarginBottom: button.marginBottom,
             selectMarginTop: Number.parseFloat(selectStyle.marginTop),
@@ -188,6 +190,7 @@ test('aligns the saved-test form as one clear action flow', async ({ page }) => 
     actionAlignment.forEach((alignment) => {
         expect(alignment.topDifference).toBeLessThan(0.1);
         expect(alignment.bottomDifference).toBeLessThan(0.1);
+        expect(alignment.belowSelect).toBe(true);
         expect(alignment.buttonMarginTop).toBe(0);
         expect(alignment.buttonMarginBottom).toBe(0);
         expect(alignment.selectMarginTop).toBe(0);

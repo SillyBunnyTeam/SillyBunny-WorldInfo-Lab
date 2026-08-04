@@ -1045,7 +1045,7 @@ export function createWorkbench({
                 renderResult();
             },
             focusActiveTab() {
-                tabButtons.find(button => button.getAttribute('aria-selected') === 'true')?.focus();
+                tabButtons.find(button => button.getAttribute('aria-selected') === 'true')?.focus({ preventScroll: true });
             },
             dispose() {
                 if (disposed) {

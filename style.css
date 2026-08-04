@@ -915,7 +915,13 @@
 }
 
 .sbwil-case-actions {
+    display: grid;
+    grid-template-columns: 1fr;
     align-items: flex-end;
+}
+
+.sbwil-case-select {
+    grid-column: 1;
 }
 
 .sbwil-case-actions .sbwil-select,
@@ -1119,6 +1125,14 @@
         grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
+    .sbwil-case-actions {
+        grid-template-columns: repeat(3, max-content);
+    }
+
+    .sbwil-case-select {
+        grid-column: 1 / -1;
+    }
+
     .sbwil-saved-test-form > h4,
     .sbwil-test-consent,
     .sbwil-privacy-details,
@@ -1141,6 +1155,14 @@
 }
 
 @container sbwil-drawer (min-width: 900px) {
+    .sbwil-case-actions {
+        grid-template-columns: minmax(160px, 320px) repeat(3, max-content);
+    }
+
+    .sbwil-case-select {
+        grid-column: auto;
+    }
+
     .sbwil-scan-layout {
         display: grid;
         grid-template-columns: minmax(270px, 0.72fr) minmax(380px, 1.28fr);
