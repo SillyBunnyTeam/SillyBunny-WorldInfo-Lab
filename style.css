@@ -919,6 +919,20 @@
     justify-content: flex-start;
 }
 
+/* Keep the consent flow aligned with the two-column fields above it. */
+.sbwil-saved-test-form .sbwil-test-consent,
+.sbwil-saved-test-form .sbwil-privacy-details,
+.sbwil-saved-test-form .sbwil-save-availability {
+    width: 100%;
+    max-width: none;
+}
+
+.sbwil-saved-test-form .sbwil-test-consent {
+    min-height: 0;
+    align-items: flex-start;
+    margin: 0;
+}
+
 .sbwil-action-row {
     flex-wrap: wrap;
     margin-bottom: 8px;

@@ -43,19 +43,26 @@ test('aligns the saved-test form as one clear action flow', async ({ page }) => 
         const consent = box('.sbwil-test-consent');
         const details = box('.sbwil-privacy-details');
         const actions = box('.sbwil-form-actions');
+        const formBox = node.getBoundingClientRect();
         return {
             fieldTopDifference: Math.abs(name.top - book.top),
-            consentStartsAtForm: Math.abs(consent.left - node.getBoundingClientRect().left),
-            detailsStartsAtForm: Math.abs(details.left - node.getBoundingClientRect().left),
-            actionStartsAtForm: Math.abs(actions.left - node.getBoundingClientRect().left),
+            consentStartsAtForm: Math.abs(consent.left - formBox.left),
+            detailsStartsAtForm: Math.abs(details.left - formBox.left),
+            actionStartsAtForm: Math.abs(actions.left - formBox.left),
+            detailsEndsAtForm: Math.abs(details.right - formBox.right),
+            consentEndsAtForm: Math.abs(consent.right - formBox.right),
             consentBelowFields: consent.top >= Math.max(name.bottom, book.bottom),
+            consentGap: consent.top - details.bottom,
         };
     });
     expect(layout.fieldTopDifference).toBeLessThanOrEqual(1);
     expect(layout.consentStartsAtForm).toBeLessThanOrEqual(1);
     expect(layout.detailsStartsAtForm).toBeLessThanOrEqual(1);
     expect(layout.actionStartsAtForm).toBeLessThanOrEqual(1);
+    expect(layout.detailsEndsAtForm).toBeLessThanOrEqual(1);
+    expect(layout.consentEndsAtForm).toBeLessThanOrEqual(1);
     expect(layout.consentBelowFields).toBe(true);
+    expect(layout.consentGap).toBeLessThanOrEqual(16);
 });
 
 test('uses named batch choices and invalidates an edited preview', async ({ page }) => {
