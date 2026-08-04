@@ -1,0 +1,22 @@
+{
+    "display_name": "World Info Lab",
+    "author": "SillyBunnyTeam",
+    "version": "0.1.0",
+    "description": "Deterministic World Info simulation, activation traces, regression cases, and guarded batch editing.",
+    "requires": [],
+    "optional": [],
+    "dependencies": [],
+    "minimum_client_version": "1.7.0",
+    "js": "index.js",
+    "css": "style.css",
+    "license": "AGPL-3.0",
+    "homePage": "https://github.com/SillyBunnyTeam/SillyBunny-WorldInfo-Lab",
+    "loading_order": 100,
+    "auto_update": true,
+    "hooks": {
+        "activate": "init",
+        "enable": "init",
+        "disable": "deactivate",
+        "clean": "clean"
+    }
+}

@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>World Info Lab fixture</title>
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+    <nav id="extensionsMenu"></nav>
+    <main id="extensions_settings2"></main>
+    <script type="module">
+        import { deactivate, init } from '/index.js';
+        import { __setHostForTests } from '/src/host.js';
+
+        const settings = {
+            world_info_depth: 2,
+            world_info_min_activations: 0,
+            world_info_min_activations_depth_max: 0,
+            world_info_budget: 25,
+            world_info_budget_cap: 0,
+            world_info_include_names: true,
+            world_info_recursive: true,
+            world_info_case_sensitive: false,
+            world_info_match_whole_words: false,
+            world_info_use_group_scoring: false,
+            world_info_character_strategy: 1,
+            world_info_max_recursion_steps: 5,
+        };
+        const book = {
+            entries: {
+                0: {
+                    uid: 0,
+                    key: ['dragon'],
+                    keysecondary: [],
+                    comment: 'Dragon fact',
+                    content: 'Dragons keep maps.',
+                    order: 100,
+                    position: 0,
+                    probability: 100,
+                    useProbability: true,
+                },
+                1: {
+                    uid: 1,
+                    key: ['maps'],
+                    keysecondary: [],
+                    comment: 'Recursive map fact',
+                    content: 'The map marks a vault.',
+                    order: 90,
+                    position: 4,
+                    depth: 2,
+                    probability: 100,
+                    useProbability: true,
+                },
+            },
+        };
+
+        class FixturePopup {
+            constructor(content, type, title, options) {
+                this.options = options;
+                this.dlg = document.createElement('dialog');
+                this.dlg.className = 'wide_dialogue_popup large_dialogue_popup';
+                const body = document.createElement('div');
+                body.className = 'popup-body';
+                const popupContent = document.createElement('div');
+                popupContent.className = 'popup-content';
+                popupContent.append(content);
+                body.append(popupContent);
+                this.dlg.append(body);
+                document.body.append(this.dlg);
+            }
+
+            show() {
+                this.dlg.open = true;
+                return new Promise(resolve => {
+                    this.resolve = resolve;
+                });
+            }
+
+            async completeCancelled() {
+                await this.options.onClosing?.();
+                this.dlg.remove();
+                this.resolve?.(null);
+            }
+        }
+
+        const eventTypes = {
+            APP_READY: 'app-ready',
+            CHAT_CHANGED: 'chat-changed',
+            MESSAGE_EDITED: 'message-edited',
+            SETTINGS_UPDATED: 'settings-updated',
+            WORLDINFO_SETTINGS_UPDATED: 'worldinfo-settings-updated',
+            WORLDINFO_UPDATED: 'worldinfo-updated',
+        };
+        const listeners = new Map();
+        const accountValues = new Map();
+        let loadDelay = 0;
+        const eventSource = {
+            on(type, handler) {
+                const handlers = listeners.get(type) ?? new Set();
+                handlers.add(handler);
+                listeners.set(type, handlers);
+            },
+            removeListener(type, handler) {
+                listeners.get(type)?.delete(handler);
+            },
+            async emit(type, ...args) {
+                for (const handler of [...(listeners.get(type) ?? [])]) {
+                    await handler(...args);
+                }
+            },
+        };
+
+        const context = {
+            accountStorage: {
+                getItem: key => accountValues.get(key) ?? null,
+                setItem: (key, value) => accountValues.set(key, String(value)),
+                removeItem: key => accountValues.delete(key),
+            },
+            characterId: 0,
+            characters: [{ avatar: 'tester.png', data: { extensions: {} } }],
+            chat: [{ mes: 'A dragon arrived.', name: 'User', is_user: true }],
+            chatMetadata: {},
+            extensionPrompts: {},
+            extensionSettings: {},
+            eventSource,
+            eventTypes,
+            maxContext: 4096,
+            name1: 'User',
+            name2: 'Tester',
+            Popup: FixturePopup,
+            POPUP_TYPE: { TEXT: 'text' },
+            powerUserSettings: {},
+            tagMap: {},
+            worldInfoSettings: { globalSelect: ['Fixture Book'], charLore: [] },
+            getCharacterCardFields: () => ({}),
+            getTokenCountAsync: async text => Math.ceil(String(text).length / 4),
+            getWorldInfoNames: () => ['Fixture Book'],
+            loadWorldInfo: async () => {
+                if (loadDelay > 0) {
+                    await new Promise(resolve => setTimeout(resolve, loadDelay));
+                }
+                return structuredClone(book);
+            },
+            reloadWorldInfoEditor: async () => {},
+            saveSettingsDebounced: () => {},
+            saveWorldInfo: async (name, value) => Object.assign(book, structuredClone(value)),
+            substituteParams: value => value,
+            updateWorldInfoList: () => {},
+        };
+        globalThis.SillyTavern = { getContext: () => context };
+        __setHostForTests({
+            ok: true,
+            warnings: [],
+            worldInfo: {
+                selected_world_info: ['Fixture Book'],
+                getWorldInfoSettings: () => settings,
+                parseRegexFromString: () => null,
+                world_info_position: {
+                    before: 0,
+                    after: 1,
+                    ANTop: 2,
+                    ANBottom: 3,
+                    atDepth: 4,
+                    EMTop: 5,
+                    EMBottom: 6,
+                    outlet: 7,
+                },
+            },
+            scanCore: {
+                normalizeWorldInfoProbability: entry => ({
+                    ...entry,
+                    probability: entry.probability ?? 100,
+                    useProbability: entry.useProbability ?? true,
+                }),
+            },
+            scanChat: { buildWorldInfoScanChat: () => [] },
+            characterBook: { normalizeWorldInfoPosition: value => Number(value) },
+            regex: null,
+            utils: {
+                getCharaFilename: () => 'tester',
+                getStringHash: value => String(value).length,
+            },
+            tags: { getTagKeyForEntity: () => null },
+            script: { getMaxPromptTokens: () => 4096 },
+        });
+
+        globalThis.fixtureDeactivate = deactivate;
+        globalThis.fixtureEmit = (...args) => eventSource.emit(...args);
+        globalThis.fixtureSetLoadDelay = value => { loadDelay = Number(value) || 0; };
+        globalThis.fixtureSetTagMap = value => { context.tagMap = structuredClone(value); };
+        init();
+        await eventSource.emit(eventTypes.APP_READY);
+    </script>
+</body>
+</html>
