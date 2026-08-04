@@ -92,6 +92,19 @@ export function mountRuntimeUi({ signal = null } = {}) {
         drawerContent?.setAttribute('aria-hidden', String(!expanded));
     }
 
+    function alignWorkbench(root) {
+        const scroller = root.closest('.sb-shell-panel-scroller, .scrollableInner, .scrollableInnerFull');
+        if (scroller && typeof scroller.scrollTo === 'function') {
+            const offset = root.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
+            scroller.scrollTo({
+                top: Math.max(0, scroller.scrollTop + offset - 8),
+                behavior: 'auto',
+            });
+        } else {
+            root.scrollIntoView({ block: 'start', inline: 'nearest' });
+        }
+    }
+
     function revealWorkbench() {
         if (disposed) {
             return;
@@ -125,16 +138,16 @@ export function mountRuntimeUi({ signal = null } = {}) {
                 return;
             }
             workbench.focus();
-            const scroller = root.closest('.sb-shell-panel-scroller, .scrollableInner, .scrollableInnerFull');
-            if (scroller && typeof scroller.scrollTo === 'function') {
-                const offset = root.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
-                scroller.scrollTo({
-                    top: Math.max(0, scroller.scrollTop + offset - 8),
-                    behavior: 'auto',
-                });
-            } else {
-                root.scrollIntoView({ block: 'start', inline: 'nearest' });
-            }
+            alignWorkbench(root);
+            let corrections = 2;
+            const correct = () => {
+                if (disposed || sequence !== revealSequence || !root.isConnected || corrections-- <= 0) {
+                    return;
+                }
+                alignWorkbench(root);
+                requestAnimationFrame(correct);
+            };
+            requestAnimationFrame(correct);
         };
         requestAnimationFrame(focusWhenSettled);
     }

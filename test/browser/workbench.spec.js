@@ -67,12 +67,16 @@ test('waits for drawer expansion before focusing and scrolling the workbench', a
     await page.evaluate(() => globalThis.fixtureSetDrawerAnimation(180));
     await page.locator('#sbwil-menu-item').click();
     await expect(page.locator('#sbwil-tab-scan')).toBeFocused();
-    const bounds = await page.evaluate(() => {
+    const readBounds = () => page.evaluate(() => {
         const shell = document.getElementById('fixture-extension-shell').getBoundingClientRect();
         const workbench = document.getElementById('sbwil-workbench').getBoundingClientRect();
         return { shellTop: shell.top, shellBottom: shell.bottom, workbenchTop: workbench.top };
     });
-    expect(bounds.workbenchTop).toBeGreaterThanOrEqual(bounds.shellTop - 1);
+    await expect.poll(async () => {
+        const bounds = await readBounds();
+        return bounds.workbenchTop >= bounds.shellTop - 1;
+    }).toBe(true);
+    const bounds = await readBounds();
     expect(bounds.workbenchTop).toBeLessThan(bounds.shellBottom);
 });
 
