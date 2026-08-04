@@ -63,6 +63,19 @@ test('aligns the saved-test form as one clear action flow', async ({ page }) => 
     expect(layout.consentEndsAtForm).toBeLessThanOrEqual(1);
     expect(layout.consentBelowFields).toBe(true);
     expect(layout.consentGap).toBeLessThanOrEqual(16);
+
+    const actionAlignment = await page.locator('.sbwil-case-actions').evaluate((node) => {
+        const select = node.querySelector('select').getBoundingClientRect();
+        const buttons = [...node.querySelectorAll('button')].map(button => button.getBoundingClientRect());
+        return buttons.map(button => ({
+            topDifference: Math.abs(button.top - select.top),
+            bottomDifference: Math.abs(button.bottom - select.bottom),
+        }));
+    });
+    actionAlignment.forEach((alignment) => {
+        expect(alignment.topDifference).toBeLessThanOrEqual(1);
+        expect(alignment.bottomDifference).toBeLessThanOrEqual(1);
+    });
 });
 
 test('uses named batch choices and invalidates an edited preview', async ({ page }) => {

@@ -255,7 +255,7 @@ export function createTestsTab({
             saveActions,
         );
 
-        const selectionRow = element('div', { className: 'sbwil-action-row' });
+        const selectionRow = element('div', { className: 'sbwil-action-row sbwil-case-actions' });
         const select = element('select', {
             className: 'text_pole sbwil-select',
             attributes: { 'aria-label': 'Saved test' },

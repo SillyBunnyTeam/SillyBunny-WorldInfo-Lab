@@ -938,6 +938,10 @@
     margin-bottom: 8px;
 }
 
+.sbwil-case-actions {
+    align-items: flex-end;
+}
+
 .sbwil-action-row .sbwil-select {
     width: min(100%, 320px) !important;
 }
