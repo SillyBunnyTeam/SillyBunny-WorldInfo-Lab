@@ -335,6 +335,7 @@
 #sbwil-settings .sbwil-input {
     width: 100%;
     min-width: 0;
+    margin: 0;
     border: 1px solid var(--sbwil-border);
     border-radius: var(--sbwil-radius-sm);
     background: var(--sbwil-bg);
@@ -383,6 +384,7 @@
 #sbwil-settings .sbwil-button {
     display: inline-flex;
     min-height: 40px;
+    margin: 0;
     align-items: center;
     justify-content: center;
     padding: 8px 14px;

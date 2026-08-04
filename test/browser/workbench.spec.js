@@ -65,16 +65,34 @@ test('aligns the saved-test form as one clear action flow', async ({ page }) => 
     expect(layout.consentGap).toBeLessThanOrEqual(16);
 
     const actionAlignment = await page.locator('.sbwil-case-actions').evaluate((node) => {
-        const select = node.querySelector('select').getBoundingClientRect();
-        const buttons = [...node.querySelectorAll('button')].map(button => button.getBoundingClientRect());
+        const selectNode = node.querySelector('select');
+        const select = selectNode.getBoundingClientRect();
+        const selectStyle = getComputedStyle(selectNode);
+        const buttons = [...node.querySelectorAll('button')].map((button) => {
+            const box = button.getBoundingClientRect();
+            const style = getComputedStyle(button);
+            return {
+                box,
+                marginTop: Number.parseFloat(style.marginTop),
+                marginBottom: Number.parseFloat(style.marginBottom),
+            };
+        });
         return buttons.map(button => ({
-            topDifference: Math.abs(button.top - select.top),
-            bottomDifference: Math.abs(button.bottom - select.bottom),
+            topDifference: Math.abs(button.box.top - select.top),
+            bottomDifference: Math.abs(button.box.bottom - select.bottom),
+            buttonMarginTop: button.marginTop,
+            buttonMarginBottom: button.marginBottom,
+            selectMarginTop: Number.parseFloat(selectStyle.marginTop),
+            selectMarginBottom: Number.parseFloat(selectStyle.marginBottom),
         }));
     });
     actionAlignment.forEach((alignment) => {
-        expect(alignment.topDifference).toBeLessThanOrEqual(1);
-        expect(alignment.bottomDifference).toBeLessThanOrEqual(1);
+        expect(alignment.topDifference).toBeLessThan(0.1);
+        expect(alignment.bottomDifference).toBeLessThan(0.1);
+        expect(alignment.buttonMarginTop).toBe(0);
+        expect(alignment.buttonMarginBottom).toBe(0);
+        expect(alignment.selectMarginTop).toBe(0);
+        expect(alignment.selectMarginBottom).toBe(0);
     });
 });
 
