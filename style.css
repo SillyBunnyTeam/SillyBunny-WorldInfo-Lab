@@ -944,6 +944,11 @@
     align-items: flex-end;
 }
 
+.sbwil-case-actions .sbwil-select,
+.sbwil-case-actions > .sbwil-button {
+    height: 40px;
+}
+
 .sbwil-action-row .sbwil-select {
     width: min(100%, 320px) !important;
 }
