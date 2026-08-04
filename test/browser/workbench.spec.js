@@ -316,6 +316,18 @@ test('keeps primary controls usable at mobile width', async ({ page }) => {
         node.scrollWidth > node.clientWidth + 1
     ));
     expect(overflow).toBe(false);
+    const tabs = await page.locator('.sbwil-tabs').evaluate((strip) => {
+        const bounds = strip.getBoundingClientRect();
+        return {
+            scrollsSideways: strip.scrollWidth > strip.clientWidth + 1,
+            clipped: [...strip.querySelectorAll('.sbwil-tab')].filter((tab) => {
+                const rect = tab.getBoundingClientRect();
+                return rect.left < bounds.left - 1 || rect.right > bounds.right + 1;
+            }).length,
+        };
+    });
+    expect(tabs.scrollsSideways).toBe(false);
+    expect(tabs.clipped).toBe(0);
     const scrolling = await page.locator('#fixture-extension-shell').evaluate((shell) => {
         const workbench = shell.querySelector('#sbwil-workbench');
         const panel = shell.querySelector('.sbwil-panel:not([hidden])');

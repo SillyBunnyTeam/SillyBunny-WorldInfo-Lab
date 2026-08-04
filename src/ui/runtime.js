@@ -124,6 +124,7 @@ export function mountRuntimeUi({ signal = null } = {}) {
                 requestAnimationFrame(focusWhenSettled);
                 return;
             }
+            workbench.focus();
             const scroller = root.closest('.sb-shell-panel-scroller, .scrollableInner, .scrollableInnerFull');
             if (scroller && typeof scroller.scrollTo === 'function') {
                 const offset = root.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
@@ -134,7 +135,6 @@ export function mountRuntimeUi({ signal = null } = {}) {
             } else {
                 root.scrollIntoView({ block: 'start', inline: 'nearest' });
             }
-            workbench.focus();
         };
         requestAnimationFrame(focusWhenSettled);
     }

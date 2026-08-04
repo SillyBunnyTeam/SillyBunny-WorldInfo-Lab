@@ -168,14 +168,14 @@
     display: flex;
     flex: 0 0 auto;
     align-items: stretch;
-    overflow-x: auto;
+    flex-wrap: wrap;
     border-bottom: 1px solid var(--sbwil-border);
     background: var(--sbwil-bg-alt);
-    scrollbar-width: thin;
 }
 
 .sbwil-tab {
     position: relative;
+    flex: 1 1 auto;
     min-width: 108px;
     min-height: 48px;
     padding: 10px 18px;
@@ -1007,9 +1007,6 @@
 
 #sbwil-settings {
     margin: 0;
-    border: 1px solid var(--sbwil-border);
-    border-radius: var(--sbwil-radius-md);
-    background: var(--sbwil-bg-alt);
     color: var(--sbwil-text);
     container-name: sbwil-drawer;
     container-type: inline-size;
@@ -1022,9 +1019,7 @@
     align-items: center;
     justify-content: space-between;
     gap: 12px;
-    padding: 10px 12px;
-    border: 0;
-    background: transparent;
+    appearance: none;
     color: inherit;
     font: inherit;
     text-align: left;
@@ -1047,18 +1042,16 @@
     font-weight: 520;
 }
 
-.sbwil-settings-content {
-    border-top: 1px solid var(--sbwil-border);
-}
-
 .sbwil-settings-body {
     display: grid;
     gap: 12px;
-    padding: 13px 14px 15px;
 }
 
 .sbwil-workbench-mount:not(:empty) {
-    border-top: 1px solid var(--sbwil-border);
+    margin-top: 4px;
+    border: 1px solid var(--sbwil-border);
+    border-radius: var(--sbwil-radius-md);
+    overflow: hidden;
 }
 
 .sbwil-settings-status,
@@ -1197,13 +1190,8 @@
 }
 
 @container sbwil-drawer (max-width: 620px) {
-    .sbwil-tabs {
-        scroll-snap-type: x proximity;
-    }
-
     .sbwil-tab {
-        min-width: 118px;
-        scroll-snap-align: start;
+        min-width: 50%;
     }
 
     .sbwil-inline-form .sbwil-button,
@@ -1236,10 +1224,10 @@
     }
 
     .sbwil-tab {
-        min-width: 94px;
-        flex: 1 0 25%;
+        min-width: 50%;
         padding-right: 8px;
         padding-left: 8px;
+        font-size: 0.82rem;
     }
 
     .sbwil-scan-controls,
