@@ -69,11 +69,11 @@ function makeId() {
 
 export function appendHistory(result, { name = '' } = {}) {
     if (result?.kind !== 'simulated') {
-        throw new TypeError('Only completed simulations can be added to history.');
+        throw new TypeError('Only completed scans can be added to recent scans.');
     }
     const item = {
         id: makeId(),
-        name: String(name || result.fingerprint || 'Simulation'),
+        name: String(name || result.fingerprint || 'Scan'),
         fingerprint: String(result.fingerprint ?? ''),
         createdAt: new Date().toISOString(),
         mode: result.input?.mode ?? '',

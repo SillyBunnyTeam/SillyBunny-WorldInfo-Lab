@@ -20,7 +20,7 @@ let writeChain = Promise.resolve();
 
 export class BatchConflictError extends Error {
     constructor(conflicts) {
-        super(`Batch preview is stale for ${conflicts.length} entr${conflicts.length === 1 ? 'y' : 'ies'}.`);
+        super(`${conflicts.length} reviewed ${conflicts.length === 1 ? 'entry changed' : 'entries changed'} after this preview was created.`);
         this.name = 'BatchConflictError';
         this.conflicts = conflicts;
     }
@@ -28,7 +28,7 @@ export class BatchConflictError extends Error {
 
 function checkAbort(signal) {
     if (signal?.aborted) {
-        throw new DOMException('Batch operation cancelled.', 'AbortError');
+        throw new DOMException('Batch edit canceled. Nothing was saved.', 'AbortError');
     }
 }
 
@@ -71,19 +71,26 @@ function finiteNumber(value, field, min, max, { integer = false, nullable = fals
     }
     const number = Number(value);
     if (!Number.isFinite(number) || (integer && !Number.isInteger(number)) || number < min || number > max) {
-        throw new TypeError(`${field} must be ${integer ? 'an integer' : 'a number'} from ${min} to ${max}.`);
+        throw new TypeError(`Enter ${field} as ${integer ? 'an integer' : 'a number'} from ${min} to ${max}.`);
     }
     return number;
 }
 
 function normalizeCharacterFilter(value) {
-    const parsed = typeof value === 'string' ? JSON.parse(value) : value;
+    let parsed = value;
+    if (typeof value === 'string') {
+        try {
+            parsed = JSON.parse(value);
+        } catch (error) {
+            throw new TypeError(`Character filter is not valid JSON. Technical details: ${error?.message ?? error}`);
+        }
+    }
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-        throw new TypeError('characterFilter must be an object.');
+        throw new TypeError('Character filter must be a JSON object containing names, tags, and isExclude.');
     }
     const strings = (items, field) => {
         if (!Array.isArray(items) || items.some(item => typeof item !== 'string')) {
-            throw new TypeError(`characterFilter.${field} must be an array of strings.`);
+            throw new TypeError(`In the character filter, "${field}" must be a JSON list of text values.`);
         }
         return [...new Set(items.map(item => item.trim()).filter(Boolean))];
     };
@@ -109,14 +116,14 @@ function normalizeFieldValue(field, value) {
         case 'position': {
             const position = finiteNumber(value, field, 0, 7, { integer: true });
             if (!Object.values(POSITION).includes(position)) {
-                throw new TypeError('position is not recognized.');
+                throw new TypeError('Choose a valid insertion position.');
             }
             return position;
         }
         case 'selectiveLogic': {
             const logic = finiteNumber(value, field, 0, 3, { integer: true });
             if (!Object.values(LOGIC).includes(logic)) {
-                throw new TypeError('selectiveLogic is not recognized.');
+                throw new TypeError('Choose a valid secondary-key rule.');
             }
             return logic;
         }
@@ -129,12 +136,12 @@ function normalizeFieldValue(field, value) {
             if (value === false || value === 'false') {
                 return false;
             }
-            throw new TypeError(`${field} must be true or false.`);
+            throw new TypeError(`Choose On or Off for ${field}.`);
         }
         case 'characterFilter':
             return normalizeCharacterFilter(value);
         default:
-            throw new TypeError(`Batch field ${field} is not supported.`);
+            throw new TypeError('That entry setting cannot be changed in Batch Edit. Choose a setting from the list.');
     }
 }
 
@@ -152,14 +159,14 @@ async function mirrorOriginalData(book, changes, signal) {
         return !book.originalData.entries.some(item => String(item.id ?? item.uid) === String(uid));
     });
     if (missing.length) {
-        throw new Error(`CharacterBook source entries are missing for ${missing.length} reviewed change${missing.length === 1 ? '' : 's'}; no changes were saved.`);
+        throw new Error(`Nothing was saved because ${missing.length} reviewed ${missing.length === 1 ? 'entry could not' : 'entries could not'} be matched to the lorebook's CharacterBook data. Reload and build a new preview.`);
     }
     const host = await loadHost();
     checkAbort(signal);
     const setOriginal = host.ok ? host.worldInfo?.setWIOriginalDataValue : null;
     const keyMap = host.ok ? host.worldInfo?.originalWIDataKeyMap : null;
     if (typeof setOriginal !== 'function' || !keyMap) {
-        throw new Error('CharacterBook mirroring APIs are unavailable; no changes were saved.');
+        throw new Error('This CharacterBook-format lorebook cannot be safely updated with this SillyBunny version. Nothing was saved.');
     }
     for (const change of changes) {
         const entry = book.entries[change.entryKey];
@@ -179,7 +186,7 @@ async function mirrorOriginalData(book, changes, signal) {
         }
         const originalKey = keyMap[change.field];
         if (!originalKey) {
-            throw new Error(`CharacterBook field mapping is unavailable for ${change.field}.`);
+            throw new Error(`The setting "${change.field}" cannot be safely written to this CharacterBook-format lorebook. Nothing was saved.`);
         }
         setOriginal(book, uid, originalKey, clone(change.after));
     }
@@ -190,7 +197,7 @@ function getBookFromSnapshot(snapshot, bookName) {
         ? snapshot.books.get(bookName)
         : snapshot?.books?.[bookName];
     if (!book) {
-        throw new Error(`Lorebook ${bookName} is not present in the preview snapshot.`);
+        throw new Error(`"${bookName}" is no longer loaded. Reload lorebooks and create a new preview.`);
     }
     return book;
 }
@@ -217,7 +224,7 @@ export async function previewBatch(payload, { signal } = {}) {
     const book = getBookFromSnapshot(payload.snapshot, bookName);
     const entries = book?.entries;
     if (!entries || typeof entries !== 'object' || Array.isArray(entries)) {
-        throw new TypeError(`Lorebook ${bookName} has no editable entries object.`);
+        throw new TypeError(`The lorebook "${bookName}" has no editable entries.`);
     }
     const operation = payload.operation === 'set-field' ? 'set-field' : 'replace-content';
     const changes = [];
@@ -227,7 +234,7 @@ export async function previewBatch(payload, { signal } = {}) {
     if (operation === 'replace-content') {
         const find = String(payload.find ?? '');
         if (!find) {
-            throw new TypeError('Literal find text cannot be empty.');
+            throw new TypeError('Enter the exact text to find.');
         }
         const replacement = String(payload.replacement ?? '');
         for (const [key, entry] of Object.entries(entries)) {
@@ -247,7 +254,7 @@ export async function previewBatch(payload, { signal } = {}) {
     } else {
         field = String(payload.field ?? '');
         if (!ALLOWED_FIELDS.has(field)) {
-            throw new TypeError(`Batch field ${field || '(empty)'} is not supported.`);
+            throw new TypeError('That entry setting cannot be changed in Batch Edit. Choose a setting from the list.');
         }
         nextValue = normalizeFieldValue(field, payload.value);
         for (const [key, entry] of Object.entries(entries)) {
@@ -278,19 +285,19 @@ export async function previewBatch(payload, { signal } = {}) {
 async function applyReviewedPreview(preview, signal) {
     checkAbort(signal);
     if (preview?.kind !== 'batch-preview' || preview.version !== PREVIEW_VERSION || !Array.isArray(preview.changes)) {
-        throw new TypeError('The reviewed batch preview is invalid.');
+        throw new TypeError('This preview is no longer valid. Build and review a new preview.');
     }
     if (!preview.changes.length) {
-        return { count: 0, message: 'No changes to apply.' };
+        return { count: 0, message: 'There are no reviewed changes to save. Create a new preview.' };
     }
     const context = getContext();
     if (typeof context?.loadWorldInfo !== 'function' || typeof context?.saveWorldInfo !== 'function') {
-        throw new Error('World Info write APIs are unavailable.');
+        throw new Error('SillyBunny cannot save lorebooks in this session. Nothing was saved.');
     }
     const fresh = await loadWorldInfoFresh(preview.bookName, { signal });
     checkAbort(signal);
     if (!fresh?.entries || typeof fresh.entries !== 'object' || Array.isArray(fresh.entries)) {
-        throw new Error(`Lorebook ${preview.bookName} could not be reloaded.`);
+        throw new Error(`The latest copy of "${preview.bookName}" could not be loaded. Nothing was saved.`);
     }
     const conflicts = [];
     for (const change of preview.changes) {
@@ -316,14 +323,20 @@ async function applyReviewedPreview(preview, signal) {
     const verifiedFresh = await loadWorldInfoFresh(preview.bookName, { signal });
     checkAbort(signal);
     if (JSON.stringify(verifiedFresh) !== JSON.stringify(fresh)) {
-        throw new Error(`Lorebook ${preview.bookName} changed during batch validation; no changes were saved.`);
+        throw new Error(`"${preview.bookName}" changed while the edit was being checked. Nothing was saved; build and review a new preview.`);
     }
     await context.saveWorldInfo(preview.bookName, next, true);
-    await context.reloadWorldInfoEditor?.(preview.bookName, true);
-    context.updateWorldInfoList?.();
+    let refreshWarning = '';
+    try {
+        await context.reloadWorldInfoEditor?.(preview.bookName, true);
+        context.updateWorldInfoList?.();
+    } catch (error) {
+        refreshWarning = `Changes were saved, but SillyBunny could not refresh its lorebook list. Reload before making another edit. Technical details: ${error?.message ?? error}`;
+    }
     return {
         count: preview.changes.length,
-        message: `${preview.changes.length} entr${preview.changes.length === 1 ? 'y' : 'ies'} updated in ${preview.bookName}.`,
+        message: `Saved changes to ${preview.changes.length} ${preview.changes.length === 1 ? 'entry' : 'entries'} in "${preview.bookName}".`,
+        refreshWarning,
     };
 }
 

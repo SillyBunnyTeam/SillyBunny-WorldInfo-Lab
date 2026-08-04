@@ -856,6 +856,69 @@
     margin-bottom: 12px;
 }
 
+.sbwil-saved-test-form {
+    display: grid;
+    max-width: 900px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+    gap: 14px 18px;
+    margin-bottom: 12px;
+}
+
+.sbwil-saved-test-form > h4,
+.sbwil-test-consent,
+.sbwil-privacy-details,
+.sbwil-save-availability,
+.sbwil-form-actions {
+    grid-column: 1 / -1;
+}
+
+.sbwil-saved-test-form > h4 {
+    margin-bottom: 0 !important;
+}
+
+.sbwil-test-consent {
+    max-width: 72ch;
+    min-height: auto;
+    align-items: flex-start;
+    margin: 3px 0 0;
+    line-height: 1.45;
+}
+
+.sbwil-test-consent input {
+    flex: 0 0 auto;
+    margin-top: 0.22em;
+}
+
+.sbwil-privacy-details {
+    max-width: 72ch;
+    border-top: 1px solid var(--sbwil-border);
+    border-bottom: 1px solid var(--sbwil-border);
+}
+
+.sbwil-privacy-details > summary {
+    display: flex;
+    min-height: 44px;
+    align-items: center;
+    cursor: pointer;
+    font-size: 0.8rem;
+    font-weight: 650;
+}
+
+.sbwil-privacy-details > div {
+    padding: 0 0 12px 20px;
+}
+
+.sbwil-save-availability {
+    max-width: 72ch;
+    margin: 0;
+}
+
+.sbwil-form-actions {
+    display: flex;
+    justify-content: flex-start;
+}
+
 .sbwil-action-row {
     flex-wrap: wrap;
     margin-bottom: 8px;
@@ -1075,11 +1138,21 @@
     }
 
     .sbwil-parameter-grid,
-    .sbwil-inline-form {
+    .sbwil-inline-form,
+    .sbwil-saved-test-form {
         grid-template-columns: 1fr;
     }
 
+    .sbwil-saved-test-form > h4,
+    .sbwil-test-consent,
+    .sbwil-privacy-details,
+    .sbwil-save-availability,
+    .sbwil-form-actions {
+        grid-column: 1;
+    }
+
     .sbwil-inline-form .sbwil-button,
+    .sbwil-saved-test-form .sbwil-button,
     .sbwil-batch-form .sbwil-button {
         justify-self: stretch;
     }

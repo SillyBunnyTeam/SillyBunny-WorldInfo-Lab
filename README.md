@@ -1,145 +1,129 @@
 # SillyBunny World Info Lab
 
-World Info Lab shows which lorebook entries would activate for the current chat or for text you
-paste into the workbench. It explains each decision, counts tokens with the active tokenizer, and
-shows where activated content would be placed.
+**See why your lorebook entries did or did not activate.**
 
-The simulator does not start a generation or change timed World Info state. Lorebooks are only
-written when you explicitly save a test case or approve a batch edit.
+World Info Lab checks the current chat, or text you paste, and shows what SillyBunny would take from
+your lorebooks for its next reply.
 
-## Requirements
+It can help when:
 
-- SillyBunny 1.7.0 or newer.
-- No server plugin or build step is required.
+- An entry should activate, but does not.
+- The wrong entries keep activating.
+- Your lorebook is using too much prompt space.
+- You want to check a large lorebook after making changes.
+- You need to update the same setting on many entries.
+
+Running a scan never sends a message, edits a lorebook, or changes timed World Info state. It saves
+only a summary to recent scan history. That summary does not contain chat or lorebook content. A
+lorebook changes only when you save a test or approve a batch edit.
 
 ## Install
 
-In SillyBunny, open **Extensions**, choose **Install Extension**, and paste:
+World Info Lab requires SillyBunny 1.7.0 or newer.
+
+1. Open **Extensions** in SillyBunny.
+2. Choose **Install Extension**.
+3. Paste this URL:
 
 ```text
 https://github.com/SillyBunnyTeam/SillyBunny-WorldInfo-Lab
 ```
 
-Reload SillyBunny after installation.
+4. Finish the installation and reload SillyBunny.
 
-For development, symlink the checkout into the user extension directory:
+No server plugin or build step is needed.
 
-```sh
-ln -s "$PWD" /path/to/SillyBunny/data/default-user/extensions/SillyBunny-WorldInfo-Lab
-```
+## First scan
 
-## Open the workbench
+1. Open the wand menu and choose **World Info Lab**.
+2. Leave **Current chat** selected.
+3. Choose **Run scan**.
+4. Look at **Activated entries** to see which entries passed their scan rules.
+5. Open **Trace** to see why every other entry was skipped.
 
-Choose **World Info Lab** from the wand menu, or open **Extensions > World Info Lab** and select
-**Open workbench**.
+You can also choose **Pasted text** to test a sentence without adding it to your chat.
 
-The workbench has four tabs:
+For example, if an entry with the key `dragon` does not activate, Trace may show that the key was
+found but a character filter blocked the entry, its probability check failed, or earlier entries used
+the available token budget.
 
-- **Scan** runs a simulation for the current chat or pasted text.
-- **Trace** explains why each entry activated, failed, or was skipped.
-- **Tests** saves and reruns regression cases stored in lorebooks.
-- **Batch Edit** previews and applies changes to one lorebook.
+## What the results mean
 
-## Scan
+- **Activated** means the entry passed its matching and activation rules.
+- **Skipped** means the entry was checked but did not pass one of its rules.
+- **Token use** shows how much prompt space the activated lorebook content uses.
+- **Budget overflow** means there was not enough allowed space for another full entry.
+- **Insertion result** shows where activated content would be inserted, including its depth and role.
+- **Scan rounds** show when one activated entry caused another entry to activate.
 
-Choose **Current chat** to inspect the active conversation, or **Pasted text** to test a small input
-without changing the chat. Select the generation trigger and deterministic seed, then choose
-**Run simulation**.
+An activated entry can still produce no prompt content. A regex script may remove its content, or a
+named outlet may be missing. Open **Insertion results** in Trace to check what would actually be added.
 
-The result includes:
+The seed controls random probability and group choices. Using the same seed with the same chat and
+lorebooks produces the same random choices, which makes results easier to compare.
 
-- Activated entries and activation reasons.
-- Recursive scan rounds.
-- Primary and secondary key matches.
-- Character filters, groups, probability checks, and budget decisions.
-- Token use and budget overflow.
-- Final position, depth, role, and rendered placement.
-- Warnings about inputs the simulator cannot reproduce.
+## The four tabs
 
-The same seed produces the same group and probability rolls for the same input and lorebook state.
+### Scan
 
-## Trace
+Run a check against the current chat or pasted text. The summary shows activated entries, token use,
+budget limits, and any important warnings.
 
-Trace lists every evaluated entry in scan order. Expand an entry to inspect each stage, including
-filters, key matching, recursion, inclusion groups, probability, and token allocation.
+### Trace
 
-Entries that activate also show their final placement. Empty content after World Info regex
-processing is reported as omitted rather than inserted.
+See each lorebook entry in the order it was checked. Expand an entry to see its keys, filters,
+probability, groups, recursion, and token decision.
 
-## Saved tests
+### Saved Tests
 
-A saved test records the simulation inputs and expected result in the selected lorebook. Rerunning
-the test uses the current entries from its source lorebooks, so it can detect changes to activation,
-budget use, or placement.
+Save a result in a lorebook and run it again later. This is useful for checking whether an edit changed
+which entries activate, how many tokens they use, or where they are inserted.
 
-Before saving, the Tests tab asks for confirmation because a portable case can contain:
+> **Before saving a test:** the test travels inside the lorebook. It can contain chat or pasted text;
+> scan-enabled prompt text; character, persona, scenario, creator-note, filename, and tag data; frozen
+> macro results; lorebook names; scan settings; the random-choice seed; timed or forced entry IDs; and
+> expected insertion results with rendered activated content. Anyone you share the lorebook with may
+> receive this information.
 
-- Chat or pasted text.
-- Scan-enabled prompt text.
-- Character and persona fields.
-- Frozen macro expansions.
-- Trigger and World Info settings.
-- Expected placements with activated rendered lorebook content.
+Delete saved tests from the Saved Tests tab before sharing a lorebook if they contain private information.
+Cleaning the extension's settings does not remove tests stored in lorebooks.
 
-Saved cases travel with the lorebook. Delete them from the Tests tab when they are no longer needed.
-Cleaning extension settings does not remove cases from lorebooks.
+The recent history list is separate. It stores only a small summary for the current SillyBunny account.
+It does not store chat text, entry content, traces, or insertion results.
 
-Recent simulation history is different from saved tests. It stores only a small account-scoped
-summary with the fingerprint, source book names, seed, activation count, and token count. It does
-not store chat text, entry content, traces, or placements.
+### Batch Edit
 
-## Batch editing
+Change several entries in one lorebook at the same time. You can replace text or update supported
+settings such as order, probability, depth, position, group weight, character filters, and enabled
+state.
 
-Batch Edit works on one selected lorebook at a time. It can replace literal text in entry content or
-set supported activation fields such as order, probability, depth, position, selective logic,
-group weight, character filters, and enabled state.
-
-The optional entry filter matches keys, UID, memo, content, and secondary keys. Every proposed
-change is shown before the Apply button is enabled.
-
-Before saving, World Info Lab reloads the lorebook directly from the server and checks the reviewed
-entries again. If an entry or the book changed after the preview, the write is stopped. CharacterBook
-source data is updated together with normalized World Info entries.
+Every proposed change is shown before **Save these changes to the lorebook** becomes available. World
+Info Lab reloads the lorebook and checks it again before saving. If the reviewed entries changed in the
+meantime, the edit stops instead of overwriting them.
 
 ## Limits
 
-- This is an independent simulator that mirrors SillyBunny 1.7.0 World Info behavior. It is not the
-  native scanner, so a later host change may require a matching extension update.
-- Current chat mode starts from stored chat data. It cannot recreate every generation-only change,
-  including all prompt regex, attachment, reasoning, and supplemental scan processing.
-- Vector similarity is not simulated. Vectorized entries are reported without invented scores.
-- A standalone extension cannot make the host's lorebook save endpoint atomic. Batch Edit performs
-  two server-fresh checks immediately before saving, but another writer could still change the file
-  between the final check and the save request.
+- World Info Lab copies SillyBunny's World Info rules in an independent simulator. A future SillyBunny
+  update may change those rules before this extension is updated.
+- Current chat scans start from the stored conversation. Some last-minute prompt processing used for
+  an actual reply cannot be recreated exactly.
+- Vector similarity is not simulated. The Lab will not invent similarity scores for vectorized entries.
+- Batch Edit checks the latest saved lorebook before writing, but SillyBunny does not provide an atomic
+  lorebook update API. A very small race remains if another writer saves at exactly the same time.
 
 ## Development
 
-Install dependencies from the lockfile:
-
 ```sh
 npm ci
-```
-
-Run linting and unit tests:
-
-```sh
 npm test
-```
-
-Run the Chromium workbench tests:
-
-```sh
-npx playwright install chromium
 npm run test:browser
 ```
 
-Run host contracts against a SillyBunny checkout:
+Set `SILLYBUNNY_ROOT` to run host contract tests against a different SillyBunny checkout:
 
 ```sh
 SILLYBUNNY_ROOT=/path/to/SillyBunny npm run test:host
 ```
-
-CI also runs the workbench tests in WebKit.
 
 ## License
 

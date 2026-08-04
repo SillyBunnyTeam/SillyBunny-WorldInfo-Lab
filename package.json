@@ -3,7 +3,7 @@
     "version": "0.1.0",
     "private": true,
     "type": "module",
-    "description": "Deterministic World Info simulation, activation traces, regression cases, and guarded batch editing.",
+    "description": "See why lorebook entries activate, save repeatable checks, and safely edit many entries at once.",
     "license": "AGPL-3.0",
     "repository": {
         "type": "git",

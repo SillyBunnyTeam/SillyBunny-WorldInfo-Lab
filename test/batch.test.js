@@ -93,14 +93,14 @@ test('batch previews are literal, filtered, normalized, and leave snapshots unto
         operation: 'set-field',
         field: 'content',
         value: 'not allowed',
-    }), /Batch field content is not supported/);
+    }), /entry setting cannot be changed/);
     await assert.rejects(previewBatch({
         bookName: 'Book',
         snapshot,
         operation: 'set-field',
         field: 'disable',
         value: 'tru',
-    }), /disable must be true or false/);
+    }), /Choose On or Off/);
 });
 
 test('batch apply reloads fresh data and merges reviewed fields without clobbering unrelated changes', async (t) => {
@@ -150,7 +150,11 @@ test('batch apply reloads fresh data and merges reviewed fields without clobberi
     t.after(() => __setHostForTests(null));
 
     const result = await applyBatch(preview);
-    assert.deepEqual(result, { count: 1, message: '1 entry updated in Book.' });
+    assert.deepEqual(result, {
+        count: 1,
+        message: 'Saved changes to 1 entry in "Book".',
+        refreshWarning: '',
+    });
     assert.equal(saved.entries.a.probability, 45);
     assert.equal(saved.entries.b.content, 'fresh beta edit');
     assert.equal(saved.entries.c.content, 'fresh entry');
@@ -186,7 +190,7 @@ test('batch apply rejects stale target entries with conflict details and does no
 
     await assert.rejects(applyBatch(preview), (error) => {
         assert.equal(error instanceof BatchConflictError, true);
-        assert.equal(error.message, 'Batch preview is stale for 1 entry.');
+        assert.equal(error.message, '1 reviewed entry changed after this preview was created.');
         assert.deepEqual(error.conflicts, [{ entryKey: 'a', uid: 1, label: 'Alpha' }]);
         return true;
     });
@@ -252,7 +256,7 @@ test('batch apply aborts when a CharacterBook source entry is missing', async (t
     __setHostForTests(makeHost());
     t.after(() => __setHostForTests(null));
 
-    await assert.rejects(applyBatch(preview), /CharacterBook source entries are missing/);
+    await assert.rejects(applyBatch(preview), /could not be matched to the lorebook's CharacterBook data/);
     assert.equal(saves, 0);
 });
 

@@ -1,4 +1,5 @@
 import { getContext } from '../host.js';
+import { LOGIC_LABEL, POSITION_LABEL } from '../constants.js';
 import { getSettings, updateSettings } from '../settings.js';
 import { snapshotLorebooks } from '../sources.js';
 import {
@@ -31,10 +32,10 @@ function recordsFrom(value, keys = []) {
     return [];
 }
 
-function tabIntroduction(title, text) {
+function tabIntroduction(title, text, kicker) {
     const header = element('header', { className: 'sbwil-panel-heading' });
     header.append(
-        element('p', { className: 'sbwil-kicker', text: 'EXTENSION API' }),
+        element('p', { className: 'sbwil-kicker', text: kicker }),
         element('h3', { text: title }),
         element('p', { className: 'sbwil-muted', text }),
     );
@@ -77,12 +78,26 @@ function caseKey(item, index) {
 }
 
 function caseName(item, index) {
-    return String(item?.name ?? item?.label ?? item?.id ?? `Case ${index + 1}`);
+    return String(item?.name ?? item?.label ?? item?.id ?? `Test ${index + 1}`);
+}
+
+function formatDate(value) {
+    if (!value) {
+        return '';
+    }
+    const date = new Date(value);
+    return Number.isNaN(date.getTime())
+        ? String(value)
+        : new Intl.DateTimeFormat(undefined, {
+            dateStyle: 'medium',
+            timeStyle: 'short',
+        }).format(date);
 }
 
 export function createTestsTab({
     panel,
     getLatestResult,
+    isLatestResultStale = () => false,
     acceptResult,
 }) {
     const controller = new AbortController();
@@ -91,6 +106,7 @@ export function createTestsTab({
     let refreshCases = async () => {};
     let refreshHistoryView = async () => {};
     let invalidateCaseRun = () => {};
+    let refreshSaveState = () => {};
 
     async function activate() {
         if (activated || disposed) {
@@ -98,12 +114,13 @@ export function createTestsTab({
         }
         activated = true;
 
-        const status = statusRegion('Loading test case and history APIs...');
+        const status = statusRegion('Loading saved tests and recent scans...');
         replace(
             panel,
             tabIntroduction(
-                'Regression tests',
-                'Save a simulation as a case, rerun stored cases, and inspect recent run history.',
+                'Saved scan tests',
+                'Save a scan result, run it again later, and see whether activation, token use, or insertion changed.',
+                'SAVED CHECKS',
             ),
             status,
         );
@@ -117,10 +134,10 @@ export function createTestsTab({
         }
 
         if (caseLoad.status === 'rejected') {
-            status.textContent = 'Tests are unavailable.';
+            status.textContent = 'Saved tests could not load. Update or reinstall World Info Lab, then try again.';
             panel.append(unavailable(
-                'Test case API unavailable',
-                `Could not load src/test-cases.js. ${errorMessage(caseLoad.reason)}`,
+                'Saved tests unavailable',
+                `Technical details: could not load src/test-cases.js. ${errorMessage(caseLoad.reason)}`,
             ));
         } else {
             renderCaseControls(caseLoad.value, status);
@@ -134,14 +151,14 @@ export function createTestsTab({
         });
         historySection.append(element('h4', {
             id: 'sbwil-history-title',
-            text: 'Recent simulations',
+            text: 'Recent scans',
         }));
         panel.append(historySection);
 
         if (historyLoad.status === 'rejected') {
             historySection.append(unavailable(
-                'History API unavailable',
-                `Could not load src/history.js. ${errorMessage(historyLoad.reason)}`,
+                'Recent scans unavailable',
+                `Technical details: could not load src/history.js. ${errorMessage(historyLoad.reason)}`,
             ));
         } else {
             await renderHistory(historyLoad.value, historySection);
@@ -155,10 +172,10 @@ export function createTestsTab({
         const removeCase = exported(module, ['deleteTestCase', 'removeTestCase']);
 
         if (!listCases) {
-            status.textContent = 'Tests are unavailable.';
+            status.textContent = 'Saved tests could not load. Update or reinstall World Info Lab, then try again.';
             panel.append(unavailable(
-                'Test case API mismatch',
-                'Expected listTestCases(), getTestCases(), or loadTestCases() from src/test-cases.js.',
+                'Saved tests unavailable',
+                'Technical details: expected listTestCases(), getTestCases(), or loadTestCases() from src/test-cases.js.',
             ));
             return;
         }
@@ -169,8 +186,8 @@ export function createTestsTab({
                 'aria-labelledby': 'sbwil-cases-title',
             },
         });
-        const title = element('h4', { id: 'sbwil-cases-title', text: 'Stored cases' });
-        const saveForm = element('form', { className: 'sbwil-inline-form' });
+        const title = element('h4', { id: 'sbwil-cases-title', text: 'Saved tests' });
+        const saveForm = element('form', { className: 'sbwil-saved-test-form' });
         const nameInput = element('input', {
             className: 'text_pole sbwil-input',
             attributes: {
@@ -178,19 +195,19 @@ export function createTestsTab({
                 required: 'required',
                 maxlength: '120',
                 autocomplete: 'off',
-                placeholder: 'Case name',
+                placeholder: 'For example, Dragon activation',
             },
         });
         const bookSelect = element('select', {
             className: 'text_pole sbwil-select',
             attributes: {
                 required: 'required',
-                'aria-label': 'Lorebook for stored test case',
+                'aria-label': 'Lorebook for saved test',
             },
         });
         const saveButton = element('button', {
             className: 'menu_button sbwil-button',
-            text: 'Save latest result',
+            text: 'Save displayed scan as test',
             attributes: { type: 'submit' },
         });
         const consentInput = element('input', {
@@ -199,46 +216,73 @@ export function createTestsTab({
                 required: 'required',
             },
         });
-        const consent = element('label', { className: 'sbwil-approval' });
+        const consent = element('label', { className: 'sbwil-approval sbwil-test-consent' });
+        const consentText = element('span');
         consent.append(
             consentInput,
-            element('span', {
-                text: 'Store replay data in this lorebook: chat or pasted text, scan prompts, character and persona fields, macro expansions, trigger, scan settings, and expected placements with activated rendered lorebook content.',
+            consentText,
+        );
+        const privacyDetails = element('details', { className: 'sbwil-privacy-details' });
+        const privacyList = element('ul');
+        [
+            'Chat messages or pasted text',
+            'Scan-enabled extension prompts',
+            'Character, persona, scenario, creator-note, filename, and tag data',
+            'Expanded macro values, lorebook names, scan settings, and random seed',
+            'Timed or forced entry IDs',
+            'Expected activated IDs, token use, insertion locations, and rendered activated content',
+        ].forEach(text => privacyList.append(element('li', { text })));
+        privacyDetails.append(
+            element('summary', { text: 'What this test stores' }),
+            privacyList,
+            element('p', {
+                text: 'Delete the test here before sharing the lorebook. Cleaning World Info Lab does not delete saved tests.',
             }),
         );
+        const saveAvailability = element('p', { className: 'sbwil-field-hint sbwil-save-availability' });
+        const saveActions = element('div', { className: 'sbwil-form-actions' });
+        saveActions.append(saveButton);
         saveButton.disabled = !saveCase;
         saveForm.append(
-            field('Name', nameInput),
-            field('Save in lorebook', bookSelect, {
-                hint: 'The case is portable and remains until deleted from Tests. Cleaning extension data does not remove it.',
+            field('Test name', nameInput, { className: 'sbwil-field sbwil-test-name' }),
+            field('Store inside lorebook', bookSelect, {
+                className: 'sbwil-field sbwil-test-book',
+                hint: 'Saved tests travel with this lorebook and remain until you delete them here.',
             }),
+            privacyDetails,
             consent,
-            saveButton,
+            saveAvailability,
+            saveActions,
         );
 
         const selectionRow = element('div', { className: 'sbwil-action-row' });
         const select = element('select', {
             className: 'text_pole sbwil-select',
-            attributes: { 'aria-label': 'Stored test case' },
+            attributes: { 'aria-label': 'Saved test' },
         });
         const runButton = element('button', {
             className: 'menu_button sbwil-button sbwil-button-primary',
-            text: 'Run selected',
+            text: 'Run selected test',
             attributes: { type: 'button' },
         });
         const deleteButton = element('button', {
             className: 'menu_button sbwil-button sbwil-button-danger',
-            text: 'Delete selected',
+            text: 'Delete selected test',
             attributes: { type: 'button' },
         });
         const reloadButton = element('button', {
             className: 'menu_button sbwil-button',
-            text: 'Reload',
+            text: 'Reload saved tests',
             attributes: { type: 'button' },
         });
         runButton.disabled = !runCase;
         deleteButton.disabled = !removeCase;
-        selectionRow.append(select, runButton, deleteButton, reloadButton);
+        selectionRow.append(
+            field('Saved test', select, { className: 'sbwil-field sbwil-case-select' }),
+            runButton,
+            deleteButton,
+            reloadButton,
+        );
 
         const capabilityNotes = [];
         if (!saveCase) {
@@ -250,14 +294,18 @@ export function createTestsTab({
         if (!removeCase) {
             capabilityNotes.push('deleteTestCase');
         }
-        const capability = element('p', {
-            className: 'sbwil-field-hint',
-            text: capabilityNotes.length
-                ? `Unavailable controls need: ${capabilityNotes.join(', ')}.`
-                : 'Cases are provided by src/test-cases.js.',
-        });
+        const capability = capabilityNotes.length
+            ? element('p', {
+                className: 'sbwil-field-hint',
+                text: `Some saved-test actions are unavailable because this installation is incomplete. Technical details: missing ${capabilityNotes.join(', ')}.`,
+            })
+            : null;
         const caseList = element('ol', { className: 'sbwil-compact-list' });
-        section.append(title, saveForm, selectionRow, capability, caseList);
+        section.append(title, saveForm, selectionRow);
+        if (capability) {
+            section.append(capability);
+        }
+        section.append(caseList);
         panel.insertBefore(section, panel.lastElementChild?.nextSibling ?? null);
 
         let cases = [];
@@ -268,17 +316,30 @@ export function createTestsTab({
         let activeCaseController = null;
         let caseRunSequence = 0;
 
+        function updateConsentText() {
+            const name = bookSelect.value || 'the selected lorebook';
+            consentText.textContent = `I understand that this test will be stored inside "${name}" and shared with that lorebook.`;
+        }
+
         function updateDisabled() {
             const busy = operationBusy || refreshBusy;
             const hasSelection = Boolean(select.value) && cases.length > 0;
-            saveButton.disabled = busy || !saveCase;
+            const hasResult = Boolean(getLatestResult());
+            const resultStale = hasResult && isLatestResultStale();
+            saveButton.disabled = busy || !saveCase || !hasResult || resultStale;
             bookSelect.disabled = busy || !bookSelect.options.length;
             consentInput.disabled = busy;
             runButton.disabled = busy || !runCase || !hasSelection;
             deleteButton.disabled = busy || !removeCase || !hasSelection;
             reloadButton.disabled = busy;
             select.disabled = busy || !cases.length;
+            saveAvailability.textContent = resultStale
+                ? 'This scan is out of date. Run it again before saving a test.'
+                : hasResult
+                    ? 'The displayed scan is ready to save as a test.'
+                    : 'Run a scan before saving it as a test.';
         }
+        refreshSaveState = updateDisabled;
 
         function cancelCaseRun(message = '') {
             if (!activeCaseController) {
@@ -294,7 +355,7 @@ export function createTestsTab({
             }
         }
 
-        invalidateCaseRun = (message = 'Stored test case run cancelled because scan inputs changed.') => {
+        invalidateCaseRun = (message = 'Saved test canceled because the chat or lorebooks changed. Run it again.') => {
             cancelCaseRun(message);
         };
 
@@ -303,15 +364,18 @@ export function createTestsTab({
             select.replaceChildren();
             caseList.replaceChildren();
             if (!cases.length) {
-                select.append(element('option', { text: 'No stored cases', attributes: { value: '' } }));
-                caseList.append(element('li', { className: 'sbwil-empty-line', text: 'No test cases yet.' }));
+                select.append(element('option', { text: 'No saved tests', attributes: { value: '' } }));
+                caseList.append(element('li', {
+                    className: 'sbwil-empty-line',
+                    text: 'No saved tests yet. Run a scan, name it above, and save it to a lorebook.',
+                }));
                 updateDisabled();
                 return;
             }
             cases.forEach((item, index) => {
                 const key = caseKey(item, index);
                 select.append(element('option', {
-                    text: `${caseName(item, index)} · ${item.bookName ?? 'unknown lorebook'}`,
+                    text: `${caseName(item, index)} · ${item.bookName ?? 'lorebook unknown'}`,
                     attributes: { value: key },
                 }));
                 const listItem = element('li');
@@ -319,7 +383,7 @@ export function createTestsTab({
                     element('strong', { text: caseName(item, index) }),
                     element('span', {
                         className: 'sbwil-list-meta',
-                        text: [item?.bookName, item?.updatedAt ?? item?.createdAt ?? item?.fingerprint]
+                        text: [item?.bookName, formatDate(item?.updatedAt ?? item?.createdAt), item?.fingerprint]
                             .filter(Boolean)
                             .join(' · '),
                     }),
@@ -351,15 +415,16 @@ export function createTestsTab({
             if (names.includes(selected)) {
                 bookSelect.value = selected;
             }
+            updateConsentText();
             updateDisabled();
         }
 
-        refreshCases = async (message = 'Test cases loaded.') => {
+        refreshCases = async (message = 'Saved tests loaded.') => {
             const sequence = ++refreshSequence;
             refreshBusy = true;
             updateDisabled();
             if (!operationBusy) {
-                status.textContent = 'Loading test cases...';
+                status.textContent = 'Loading saved tests...';
             }
             try {
                 const [value, names] = await Promise.all([
@@ -378,7 +443,7 @@ export function createTestsTab({
                 }
             } catch (error) {
                 if (!disposed && sequence === refreshSequence && !operationBusy) {
-                    status.textContent = `Could not load test cases. ${errorMessage(error)}`;
+                    status.textContent = `Saved tests could not be loaded. Try again. Technical details: ${errorMessage(error)}`;
                 }
             } finally {
                 if (sequence === refreshSequence) {
@@ -392,7 +457,11 @@ export function createTestsTab({
             event.preventDefault();
             const result = getLatestResult();
             if (!result) {
-                status.textContent = 'Run a simulation before saving a test case.';
+                status.textContent = 'Run a scan before saving it as a test.';
+                return;
+            }
+            if (isLatestResultStale()) {
+                status.textContent = 'This scan is out of date. Run it again before saving a test.';
                 return;
             }
             syncBookOptions();
@@ -400,26 +469,30 @@ export function createTestsTab({
                 return;
             }
             if (!bookSelect.value) {
-                status.textContent = 'Choose an active lorebook before saving a test case.';
+                status.textContent = 'Choose a lorebook in which to store this test.';
                 return;
             }
+            const testName = nameInput.value.trim();
+            const bookName = bookSelect.value;
             operationBusy = true;
             updateDisabled();
-            status.textContent = 'Saving test case...';
+            status.textContent = `Saving test "${testName}" to "${bookName}"...`;
             try {
-                await saveCase({
-                    name: nameInput.value.trim(),
-                    bookName: bookSelect.value,
+                const saved = await saveCase({
+                    name: testName,
+                    bookName,
                     result: structuredClone(result),
                     createdAt: new Date().toISOString(),
                     confirmReplayStorage: consentInput.checked,
                 });
                 nameInput.value = '';
                 consentInput.checked = false;
-                await refreshCases('Test case saved.');
-                status.textContent = 'Test case saved.';
+                await refreshCases(`Saved test "${testName}" to "${bookName}".`);
+                status.textContent = saved?.refreshWarning
+                    ? String(saved.refreshWarning)
+                    : `Saved test "${testName}" to "${bookName}".`;
             } catch (error) {
-                status.textContent = `Could not save the test case. ${errorMessage(error)}`;
+                status.textContent = `The test could not be saved. Nothing was changed. Technical details: ${errorMessage(error)}`;
             } finally {
                 operationBusy = false;
                 updateDisabled();
@@ -438,7 +511,7 @@ export function createTestsTab({
             activeCaseController = runController;
             operationBusy = true;
             updateDisabled();
-            status.textContent = `Running ${caseName(selected, index)}...`;
+            status.textContent = `Running saved test "${caseName(selected, index)}"...`;
             try {
                 const response = await runCase(selected, { signal: runController.signal });
                 if (disposed || runController.signal.aborted || sequence !== caseRunSequence) {
@@ -451,13 +524,15 @@ export function createTestsTab({
                 status.textContent = String(
                     response?.summary
                     ?? response?.message
-                    ?? (response?.passed === false ? 'Test failed.' : 'Test run complete.'),
+                    ?? (response?.passed === false
+                        ? 'The saved test did not match. Open Scan and Trace to inspect the new result.'
+                        : 'Saved test complete.'),
                 );
             } catch (error) {
                 if (disposed || runController.signal.aborted || sequence !== caseRunSequence) {
                     return;
                 }
-                status.textContent = `Could not run the test case. ${errorMessage(error)}`;
+                status.textContent = `The saved test could not run. Technical details: ${errorMessage(error)}`;
             } finally {
                 if (sequence === caseRunSequence) {
                     activeCaseController = null;
@@ -473,17 +548,27 @@ export function createTestsTab({
             if (!removeCase || !selected) {
                 return;
             }
+            const name = caseName(selected, index);
+            const book = selected.bookName ?? 'its lorebook';
+            if (typeof globalThis.confirm === 'function'
+                && !globalThis.confirm(`Delete "${name}" from "${book}"? This cannot be undone.`)) {
+                return;
+            }
             operationBusy = true;
             updateDisabled();
-            status.textContent = `Deleting ${caseName(selected, index)}...`;
+            status.textContent = `Deleting saved test "${name}"...`;
             try {
-                await removeCase(selected.id ?? selected.key ?? selected.name, {
+                const removed = await removeCase(selected.id ?? selected.key ?? selected.name, {
                     bookName: selected.bookName,
                 });
-                await refreshCases('Test case deleted.');
-                status.textContent = 'Test case deleted.';
+                if (removed === false) {
+                    status.textContent = 'The test was not found. It may already have been deleted; reload saved tests.';
+                    return;
+                }
+                await refreshCases('Saved test deleted.');
+                status.textContent = 'Saved test deleted.';
             } catch (error) {
-                status.textContent = `Could not delete the test case. ${errorMessage(error)}`;
+                status.textContent = `The saved test could not be deleted. Technical details: ${errorMessage(error)}`;
             } finally {
                 operationBusy = false;
                 updateDisabled();
@@ -493,6 +578,7 @@ export function createTestsTab({
         reloadButton.addEventListener('click', () => {
             void refreshCases();
         }, { signal: controller.signal });
+        bookSelect.addEventListener('change', updateConsentText, { signal: controller.signal });
 
         void refreshCases();
     }
@@ -501,14 +587,20 @@ export function createTestsTab({
         const listHistory = exported(module, ['listHistory', 'getHistory', 'loadHistory']);
         if (!listHistory) {
             section.append(unavailable(
-                'History API mismatch',
-                'Expected listHistory(), getHistory(), or loadHistory() from src/history.js.',
+                'Recent scans unavailable',
+                'Technical details: expected listHistory(), getHistory(), or loadHistory() from src/history.js.',
             ));
             return;
         }
 
         const list = element('ol', { className: 'sbwil-compact-list' });
-        section.append(list);
+        section.append(
+            element('p', {
+                className: 'sbwil-field-hint',
+                text: 'Recent scans are summary-only. They do not contain chat text, entry content, Trace details, or inserted content.',
+            }),
+            list,
+        );
         refreshHistoryView = async () => {
             list.replaceChildren();
             try {
@@ -518,21 +610,27 @@ export function createTestsTab({
                 }
                 const history = recordsFrom(value, ['history', 'runs', 'entries']).slice(0, 20);
                 if (!history.length) {
-                    list.append(element('li', { className: 'sbwil-empty-line', text: 'No history entries yet.' }));
+                    list.append(element('li', {
+                        className: 'sbwil-empty-line',
+                        text: 'No recent scans yet. Completed scans will appear here.',
+                    }));
                     return;
                 }
                 history.forEach((item, index) => {
                     const row = element('li');
+                    const timestamp = item?.createdAt ?? item?.timestamp;
                     row.append(
                         element('strong', {
-                            text: String(item?.name ?? item?.label ?? item?.fingerprint ?? `Run ${index + 1}`),
+                            text: String(item?.name ?? item?.label ?? (timestamp
+                                ? `Scan on ${formatDate(timestamp)}`
+                                : `Scan ${index + 1}`)),
                         }),
                         element('span', {
                             className: 'sbwil-list-meta',
                             text: [
-                                item?.createdAt ?? item?.timestamp,
-                                `${item?.activated ?? 0} activated`,
-                                `${item?.tokens ?? 0} tokens`,
+                                `${item?.activated ?? 0} entries activated`,
+                                `${item?.tokens ?? 0} lorebook tokens`,
+                                item?.fingerprint ? `Result ID ${item.fingerprint}` : '',
                             ].filter(Boolean).join(' · '),
                         }),
                     );
@@ -541,7 +639,7 @@ export function createTestsTab({
             } catch (error) {
                 list.append(element('li', {
                     className: 'sbwil-empty-line',
-                    text: `Could not load history. ${errorMessage(error)}`,
+                    text: `Recent scans could not be loaded. Try again. Technical details: ${errorMessage(error)}`,
                 }));
             }
         };
@@ -555,12 +653,15 @@ export function createTestsTab({
                 return;
             }
             await Promise.allSettled([
-                refreshCases('Test cases refreshed.'),
+                refreshCases('Saved tests refreshed.'),
                 refreshHistoryView(),
             ]);
         },
         invalidate(message) {
             invalidateCaseRun(message);
+        },
+        syncResultState() {
+            refreshSaveState();
         },
         dispose() {
             invalidateCaseRun();
@@ -578,6 +679,24 @@ function changeLabel(change, index) {
     return String(change?.label ?? change?.comment ?? change?.id ?? change?.uid ?? `Change ${index + 1}`);
 }
 
+const BATCH_FIELD_LABEL = Object.freeze({
+    order: 'Order',
+    probability: 'Probability',
+    useProbability: 'Probability check',
+    depth: 'Insertion depth',
+    scanDepth: 'Scan depth',
+    position: 'Insertion position',
+    selectiveLogic: 'Secondary-key rule',
+    groupWeight: 'Group weight',
+    disable: 'Entry state',
+    matchWholeWords: 'Whole-word matching',
+    characterFilter: 'Character filter',
+});
+
+function humanFieldName(fieldName) {
+    return BATCH_FIELD_LABEL[fieldName] ?? '';
+}
+
 function renderBatchPreview(container, preview) {
     const changes = previewChanges(preview);
     const reportedCount = Number(preview?.count ?? preview?.changed ?? changes.length);
@@ -585,7 +704,7 @@ function renderBatchPreview(container, preview) {
     container.replaceChildren();
     container.append(element('p', {
         className: 'sbwil-preview-count',
-        text: `${count} proposed change${count === 1 ? '' : 's'}.`,
+        text: `${count} ${count === 1 ? 'entry would' : 'entries would'} change.`,
     }));
 
     if (!changes.length) {
@@ -599,7 +718,10 @@ function renderBatchPreview(container, preview) {
 
     changes.forEach((change, index) => {
         const details = element('details', { className: 'sbwil-change' });
-        details.append(element('summary', { text: changeLabel(change, index) }));
+        const setting = change?.field === 'content' ? 'Content' : humanFieldName(change?.field);
+        details.append(element('summary', {
+            text: setting ? `${changeLabel(change, index)}: ${setting}` : changeLabel(change, index),
+        }));
         const before = change?.before ?? change?.oldValue ?? change?.previous;
         const after = change?.after ?? change?.newValue ?? change?.next;
         if (before !== undefined) {
@@ -634,12 +756,13 @@ export function createBatchTab({ panel }) {
         }
         activated = true;
 
-        const status = statusRegion('Loading batch API...');
+        const status = statusRegion('Loading batch editing...');
         replace(
             panel,
             tabIntroduction(
-                'Guarded batch edit',
-                'Change content or activation fields across one lorebook, review every entry, then apply the accepted preview.',
+                'Edit many lorebook entries',
+                'Change content or settings in one lorebook, review every proposed change, then save only the reviewed preview.',
+                'LOREBOOK MAINTENANCE',
             ),
             status,
         );
@@ -649,10 +772,10 @@ export function createBatchTab({ panel }) {
             module = await import('../batch.js');
         } catch (error) {
             if (!disposed) {
-                status.textContent = 'Batch editing is unavailable.';
+                status.textContent = 'Batch editing could not load. Update or reinstall World Info Lab, then try again.';
                 panel.append(unavailable(
-                    'Batch API unavailable',
-                    `Could not load src/batch.js. ${errorMessage(error)}`,
+                    'Batch editing unavailable',
+                    `Technical details: could not load src/batch.js. ${errorMessage(error)}`,
                 ));
             }
             return;
@@ -664,10 +787,10 @@ export function createBatchTab({ panel }) {
         const previewBatch = exported(module, ['previewBatch', 'buildBatchPreview', 'previewChanges']);
         const applyBatch = exported(module, ['applyBatch', 'commitBatch', 'applyChanges']);
         if (!previewBatch || !applyBatch) {
-            status.textContent = 'Batch editing is unavailable.';
+            status.textContent = 'Batch editing could not load. Update or reinstall World Info Lab, then try again.';
             panel.append(unavailable(
-                'Batch API mismatch',
-                'Expected previewBatch() and applyBatch() compatible exports from src/batch.js.',
+                'Batch editing unavailable',
+                'Technical details: expected previewBatch() and applyBatch() from src/batch.js.',
             ));
             return;
         }
@@ -682,15 +805,15 @@ export function createBatchTab({ panel }) {
         });
         const operationSelect = element('select', {
             className: 'text_pole sbwil-select',
-            attributes: { 'aria-label': 'Batch operation' },
+            attributes: { 'aria-label': 'Edit type' },
         });
         operationSelect.append(
             element('option', {
-                text: 'Replace content text',
+                text: 'Find and replace in entry content',
                 attributes: { value: 'replace-content' },
             }),
             element('option', {
-                text: 'Set activation field',
+                text: 'Change an entry setting',
                 attributes: { value: 'set-field' },
             }),
         );
@@ -699,8 +822,8 @@ export function createBatchTab({ panel }) {
             attributes: {
                 type: 'search',
                 autocomplete: 'off',
-                'aria-label': 'Entry filter',
-                placeholder: 'Optional key, UID, memo, or content filter',
+                'aria-label': 'Entries to include',
+                placeholder: 'Search keys, entry ID, comment, or content',
             },
         });
         const findInput = element('input', {
@@ -709,8 +832,8 @@ export function createBatchTab({ panel }) {
                 type: 'text',
                 required: 'required',
                 autocomplete: 'off',
-                'aria-label': 'Content text to find',
-                placeholder: 'Literal text to find',
+                'aria-label': 'Exact text to find',
+                placeholder: 'Exact text to find',
             },
         });
         const replacementInput = element('textarea', {
@@ -718,66 +841,86 @@ export function createBatchTab({ panel }) {
             attributes: {
                 rows: '3',
                 'aria-label': 'Replacement content',
-                placeholder: 'Replacement text (may be empty)',
+                placeholder: 'Leave blank to delete each match',
             },
         });
         const fieldSelect = element('select', {
             className: 'text_pole sbwil-select',
-            attributes: { 'aria-label': 'Activation field' },
+            attributes: { 'aria-label': 'Entry setting' },
         });
-        [
-            ['order', 'Order'],
-            ['probability', 'Probability'],
-            ['useProbability', 'Use probability'],
-            ['depth', 'Insertion depth'],
-            ['scanDepth', 'Scan depth'],
-            ['position', 'Position (0-7)'],
-            ['selectiveLogic', 'Secondary logic (0-3)'],
-            ['groupWeight', 'Group weight'],
-            ['disable', 'Disabled'],
-            ['matchWholeWords', 'Match whole words'],
-            ['characterFilter', 'Character filter JSON'],
-        ].forEach(([value, label]) => {
+        Object.entries(BATCH_FIELD_LABEL).forEach(([value, label]) => {
             fieldSelect.append(element('option', {
                 text: label,
                 attributes: { value },
             }));
         });
-        const valueInput = element('textarea', {
-            className: 'text_pole sbwil-textarea sbwil-textarea-compact',
+        const numberValueInput = element('input', {
+            className: 'text_pole sbwil-input',
             attributes: {
-                rows: '2',
+                type: 'number',
                 required: 'required',
-                'aria-label': 'New field value',
-                placeholder: 'New value',
+                inputmode: 'decimal',
+                'aria-label': 'New setting value',
             },
         });
+        const choiceValueSelect = element('select', {
+            className: 'text_pole sbwil-select',
+            attributes: {
+                required: 'required',
+                'aria-label': 'New setting value',
+            },
+        });
+        const jsonValueInput = element('textarea', {
+            className: 'text_pole sbwil-textarea sbwil-textarea-compact',
+            attributes: {
+                rows: '4',
+                required: 'required',
+                'aria-label': 'New setting value',
+                placeholder: '{"names":[],"tags":[],"isExclude":false}',
+            },
+        });
+        const valueField = element('label', { className: 'sbwil-field' });
+        const valueFieldLabel = element('span', {
+            className: 'sbwil-field-label',
+            text: 'New setting value',
+        });
+        const valueFieldHint = element('span', { className: 'sbwil-field-hint' });
+        let activeValueControl = numberValueInput;
         const replaceFields = element('div', { className: 'sbwil-batch-fields' });
         replaceFields.append(
-            field('Find', findInput, { hint: 'Literal, case-sensitive matching.' }),
-            field('Replace with', replacementInput),
+            field('Find exact text', findInput, {
+                hint: 'Replaces every exact, case-sensitive occurrence. Special characters are treated as text, not patterns.',
+            }),
+            field('Replace with', replacementInput, {
+                hint: 'Leave blank to delete each matching piece of text.',
+            }),
         );
         const setFields = element('div', { className: 'sbwil-batch-fields' });
         setFields.append(
-            field('Field', fieldSelect),
-            field('New value', valueInput, {
-                hint: 'Use true/false for switches. Position: 0-7. Secondary logic: 0-3. Character filters use JSON.',
-            }),
+            field('Entry setting', fieldSelect),
+            valueField,
         );
         const previewButton = element('button', {
             className: 'menu_button sbwil-button sbwil-button-primary',
             text: 'Preview changes',
             attributes: { type: 'submit' },
         });
+        const reloadBooksButton = element('button', {
+            className: 'menu_button sbwil-button',
+            text: 'Reload lorebooks',
+            attributes: { type: 'button' },
+        });
+        const batchActions = element('div', { className: 'sbwil-action-row' });
+        batchActions.append(previewButton, reloadBooksButton);
         form.append(
             field('Lorebook', bookSelect),
-            field('Operation', operationSelect),
-            field('Entry filter', filterInput, {
-                hint: 'Leave empty to target every eligible entry in the selected lorebook.',
+            field('What do you want to change?', operationSelect),
+            field('Which entries?', filterInput, {
+                hint: 'Only matching entries are checked. Leave blank to check every entry in this lorebook.',
             }),
             replaceFields,
             setFields,
-            previewButton,
+            batchActions,
         );
 
         const previewRegion = element('section', {
@@ -789,18 +932,21 @@ export function createBatchTab({ panel }) {
         });
         previewRegion.append(element('p', {
             className: 'sbwil-empty-line',
-            text: 'No preview yet.',
+            text: 'Choose an edit above, then select Preview changes. Nothing will be saved yet.',
         }));
 
         const approval = element('label', { className: 'sbwil-approval' });
         const approvalInput = element('input', { attributes: { type: 'checkbox' } });
+        const approvalText = element('span', {
+            text: 'I reviewed every proposed change and want to save it to this lorebook.',
+        });
         approval.append(
             approvalInput,
-            element('span', { text: 'I reviewed this preview and want to apply it.' }),
+            approvalText,
         );
         const applyButton = element('button', {
             className: 'menu_button sbwil-button sbwil-button-danger',
-            text: 'Apply reviewed preview',
+            text: 'Save these changes to the lorebook',
             attributes: { type: 'button' },
         });
         applyButton.disabled = true;
@@ -811,6 +957,85 @@ export function createBatchTab({ panel }) {
         let previewPayload = null;
         let busy = false;
         let bookRefresh = 0;
+
+        function updateApprovalText() {
+            approvalText.textContent = bookSelect.value
+                ? `I reviewed every proposed change and want to save it to "${bookSelect.value}".`
+                : 'I reviewed every proposed change and want to save it to this lorebook.';
+        }
+
+        function setChoiceOptions(options) {
+            choiceValueSelect.replaceChildren();
+            options.forEach(([value, label]) => {
+                choiceValueSelect.append(element('option', {
+                    text: label,
+                    attributes: { value },
+                }));
+            });
+        }
+
+        function configureValueControl(announce = true) {
+            const fieldName = fieldSelect.value;
+            let hint = '';
+            if (fieldName === 'position') {
+                activeValueControl = choiceValueSelect;
+                setChoiceOptions(Object.entries(POSITION_LABEL));
+                hint = 'Choose where the activated entry content should be inserted.';
+            } else if (fieldName === 'selectiveLogic') {
+                activeValueControl = choiceValueSelect;
+                setChoiceOptions([
+                    ['0', `${LOGIC_LABEL[0]}: at least one secondary key must match`],
+                    ['1', `${LOGIC_LABEL[1]}: not every secondary key may match`],
+                    ['2', `${LOGIC_LABEL[2]}: no secondary key may match`],
+                    ['3', `${LOGIC_LABEL[3]}: every secondary key must match`],
+                ]);
+                hint = 'This rule is checked after a primary key matches.';
+            } else if (['disable', 'matchWholeWords', 'useProbability'].includes(fieldName)) {
+                activeValueControl = choiceValueSelect;
+                const labels = {
+                    disable: [
+                        ['false', 'Entry enabled'],
+                        ['true', 'Entry disabled'],
+                    ],
+                    matchWholeWords: [
+                        ['false', 'Off: allow partial-word matches'],
+                        ['true', 'On: require whole-word matches'],
+                    ],
+                    useProbability: [
+                        ['true', 'On: use the entry probability'],
+                        ['false', 'Off: skip the probability check'],
+                    ],
+                };
+                setChoiceOptions(labels[fieldName]);
+                hint = 'Choose the state to apply to every matching entry.';
+            } else if (fieldName === 'characterFilter') {
+                activeValueControl = jsonValueInput;
+                jsonValueInput.value = '';
+                hint = 'Advanced: enter a JSON object with names, tags, and isExclude.';
+            } else {
+                activeValueControl = numberValueInput;
+                numberValueInput.value = '';
+                const config = {
+                    order: { min: '-1000000', max: '1000000', step: 'any', placeholder: 'For example, 100', hint: 'Higher values are checked earlier.' },
+                    probability: { min: '0', max: '100', step: 'any', placeholder: '0 to 100', hint: 'Chance to activate after all other checks pass.' },
+                    depth: { min: '0', max: '10000', step: '1', placeholder: '0 to 10000', hint: 'Chat depth used when the insertion position is At chat depth.' },
+                    scanDepth: { min: '0', max: '1000', step: '1', placeholder: 'Leave blank to use the global scan depth', hint: 'Number of recent messages this entry checks. Leave blank to use the lorebook setting.' },
+                    groupWeight: { min: '1', max: '999999', step: 'any', placeholder: '1 or more', hint: 'Relative chance of being chosen from an inclusion group.' },
+                }[fieldName];
+                numberValueInput.min = config.min;
+                numberValueInput.max = config.max;
+                numberValueInput.step = config.step;
+                numberValueInput.placeholder = config.placeholder;
+                numberValueInput.required = fieldName !== 'scanDepth';
+                hint = config.hint;
+            }
+            valueFieldHint.textContent = hint;
+            valueField.replaceChildren(valueFieldLabel, activeValueControl, valueFieldHint);
+            if (announce && preview) {
+                invalidatePreview('Edit settings changed. Select Preview changes again before saving.');
+            }
+            updateDisabled();
+        }
 
         function invalidatePreview(message = '') {
             preview = null;
@@ -832,19 +1057,21 @@ export function createBatchTab({ panel }) {
             findInput.disabled = busy;
             replacementInput.disabled = busy;
             fieldSelect.disabled = busy;
-            valueInput.disabled = busy;
+            activeValueControl.disabled = busy;
             previewButton.disabled = busy || !bookSelect.value || !snapshot;
+            reloadBooksButton.disabled = busy;
             approvalInput.disabled = busy || !preview;
             applyButton.disabled = busy || !preview || !approvalInput.checked;
         }
 
-        function syncOperation() {
+        function syncOperation(announce = true) {
             const replaceContent = operationSelect.value === 'replace-content';
             replaceFields.hidden = !replaceContent;
             setFields.hidden = replaceContent;
             findInput.required = replaceContent;
-            valueInput.required = !replaceContent;
-            invalidatePreview('Operation changed. Build a new preview.');
+            if (announce && preview) {
+                invalidatePreview('Edit type changed. Select Preview changes again before saving.');
+            }
             updateDisabled();
         }
 
@@ -852,10 +1079,10 @@ export function createBatchTab({ panel }) {
             snapshot = null;
             updateDisabled();
             if (!name) {
-                status.textContent = 'No lorebooks are available.';
+                status.textContent = 'No lorebooks were found. Create or import a lorebook, then reload this tab.';
                 return;
             }
-            status.textContent = `Loading ${name}...`;
+            status.textContent = `Loading "${name}"...`;
             const nextSnapshot = preloaded?.books?.has(name)
                 ? preloaded
                 : await snapshotLorebooks({ context: getContext(), bookNames: [name] });
@@ -867,13 +1094,13 @@ export function createBatchTab({ panel }) {
             const count = book?.entries && typeof book.entries === 'object'
                 ? Object.keys(book.entries).length
                 : 0;
-            status.textContent = `${count} entries available for preview in ${name}.`;
+            status.textContent = `Loaded "${name}": ${count} ${count === 1 ? 'entry' : 'entries'} ready to review.`;
         }
 
         refreshBooks = async (announce = false) => {
             const sequence = ++bookRefresh;
             if (announce) {
-                invalidatePreview('Sources changed. Build a new preview.');
+                invalidatePreview('Lorebooks changed. Select Preview changes again before saving.');
             }
             busy = true;
             snapshot = null;
@@ -898,7 +1125,7 @@ export function createBatchTab({ panel }) {
                 bookSelect.replaceChildren();
                 if (!names.length) {
                     bookSelect.append(element('option', {
-                        text: 'No lorebooks',
+                        text: 'No lorebooks found',
                         attributes: { value: '' },
                     }));
                 } else {
@@ -911,6 +1138,7 @@ export function createBatchTab({ panel }) {
                     bookSelect.value = names.includes(saved) ? saved : names[0];
                 }
                 const preloaded = activeSnapshot?.books?.has(bookSelect.value) ? activeSnapshot : null;
+                updateApprovalText();
                 await loadBookSnapshot(bookSelect.value, sequence, preloaded);
             } catch (error) {
                 if (disposed || sequence !== bookRefresh) {
@@ -918,10 +1146,10 @@ export function createBatchTab({ panel }) {
                 }
                 snapshot = null;
                 bookSelect.replaceChildren(element('option', {
-                    text: 'Lorebooks unavailable',
+                    text: 'Could not load lorebooks',
                     attributes: { value: '' },
                 }));
-                status.textContent = `Could not load lorebooks. ${errorMessage(error)}`;
+                status.textContent = `Lorebooks could not be loaded. Try again. Technical details: ${errorMessage(error)}`;
             } finally {
                 if (sequence === bookRefresh) {
                     busy = false;
@@ -933,13 +1161,14 @@ export function createBatchTab({ panel }) {
         bookSelect.addEventListener('change', () => {
             const sequence = ++bookRefresh;
             updateSettings({ selectedBook: bookSelect.value });
-            invalidatePreview('Selection changed. Build a new preview.');
+            updateApprovalText();
+            invalidatePreview('The selected lorebook changed. Select Preview changes again before saving.');
             busy = true;
             snapshot = null;
             updateDisabled();
             void loadBookSnapshot(bookSelect.value, sequence).catch((error) => {
                 if (!disposed && sequence === bookRefresh) {
-                    status.textContent = `Could not load ${bookSelect.value}. ${errorMessage(error)}`;
+                    status.textContent = `"${bookSelect.value}" could not be loaded. Try again. Technical details: ${errorMessage(error)}`;
                 }
             }).finally(() => {
                 if (sequence === bookRefresh) {
@@ -950,18 +1179,20 @@ export function createBatchTab({ panel }) {
         }, { signal: controller.signal });
 
         operationSelect.addEventListener('change', syncOperation, { signal: controller.signal });
-        fieldSelect.addEventListener('change', () => {
-            const examples = {
-                characterFilter: '{"names":[],"tags":[],"isExclude":false}',
-                disable: 'true',
-                matchWholeWords: 'true',
-                useProbability: 'true',
-                position: '0',
-                selectiveLogic: '0',
-            };
-            valueInput.placeholder = examples[fieldSelect.value] ?? 'New numeric value';
-            invalidatePreview('Field changed. Build a new preview.');
-            updateDisabled();
+        fieldSelect.addEventListener('change', configureValueControl, { signal: controller.signal });
+        [filterInput, findInput, replacementInput, numberValueInput, jsonValueInput].forEach((control) => {
+            control.addEventListener('input', () => {
+                if (preview) {
+                    invalidatePreview('Edit settings changed. Select Preview changes again before saving.');
+                    updateDisabled();
+                }
+            }, { signal: controller.signal });
+        });
+        choiceValueSelect.addEventListener('change', () => {
+            if (preview) {
+                invalidatePreview('Edit settings changed. Select Preview changes again before saving.');
+                updateDisabled();
+            }
         }, { signal: controller.signal });
 
         form.addEventListener('submit', async (event) => {
@@ -972,7 +1203,7 @@ export function createBatchTab({ panel }) {
             busy = true;
             invalidatePreview();
             updateDisabled();
-            status.textContent = 'Building guarded preview...';
+            status.textContent = 'Checking entries and building a preview...';
             const payload = {
                 operation: operationSelect.value,
                 bookName: bookSelect.value,
@@ -980,7 +1211,7 @@ export function createBatchTab({ panel }) {
                 replacement: replacementInput.value,
                 filter: filterInput.value,
                 field: fieldSelect.value,
-                value: valueInput.value,
+                value: activeValueControl.value,
                 snapshot,
             };
             try {
@@ -992,13 +1223,13 @@ export function createBatchTab({ panel }) {
                 preview = count > 0 ? result : null;
                 previewPayload = count > 0 ? payload : null;
                 status.textContent = count > 0
-                    ? 'Preview ready. Review the proposed changes before applying.'
-                    : 'Preview complete. No matching entries changed.';
+                    ? 'Preview ready. Review every proposed change before saving.'
+                    : 'No entries would change. No entries matched, or matching entries already had the requested value.';
             } catch (error) {
-                status.textContent = `Could not build the preview. ${errorMessage(error)}`;
+                status.textContent = `The preview could not be built. Nothing was saved. Technical details: ${errorMessage(error)}`;
                 previewRegion.replaceChildren(element('p', {
                     className: 'sbwil-empty-line',
-                    text: 'Preview failed. No changes were applied.',
+                    text: 'Preview failed. Nothing was saved.',
                 }));
             } finally {
                 busy = false;
@@ -1007,6 +1238,9 @@ export function createBatchTab({ panel }) {
         }, { signal: controller.signal });
 
         approvalInput.addEventListener('change', updateDisabled, { signal: controller.signal });
+        reloadBooksButton.addEventListener('click', () => {
+            void refreshBooks(true);
+        }, { signal: controller.signal });
 
         applyButton.addEventListener('click', async () => {
             if (!preview || !previewPayload || !approvalInput.checked) {
@@ -1014,24 +1248,36 @@ export function createBatchTab({ panel }) {
             }
             busy = true;
             updateDisabled();
-            status.textContent = 'Applying reviewed preview...';
+            const bookName = previewPayload.bookName;
+            const changeCount = previewChanges(preview).length;
+            status.textContent = `Saving ${changeCount} reviewed ${changeCount === 1 ? 'change' : 'changes'} to "${bookName}"...`;
             try {
                 const response = await applyBatch(preview, {
                     payload: previewPayload,
                     signal: controller.signal,
                 });
-                status.textContent = String(response?.message ?? 'Batch changes applied.');
-                invalidatePreview('Changes applied. Build another preview to continue.');
                 await refreshBooks(false);
+                invalidatePreview(`Changes saved to "${bookName}". Select Preview changes to make another edit.`);
+                status.textContent = response?.refreshWarning
+                    ? String(response.refreshWarning)
+                    : `Changes saved to "${bookName}".`;
             } catch (error) {
-                status.textContent = `Could not apply the batch. ${errorMessage(error)}`;
+                if (error?.name === 'BatchConflictError' || Array.isArray(error?.conflicts)) {
+                    const count = error?.conflicts?.length ?? 1;
+                    const message = `Nothing was saved because ${count} reviewed ${count === 1 ? 'entry changed' : 'entries changed'} after this preview was created. Build and review a new preview.`;
+                    status.textContent = message;
+                    invalidatePreview(message);
+                } else {
+                    status.textContent = `The changes could not be saved. Nothing was changed. Technical details: ${errorMessage(error)}`;
+                }
             } finally {
                 busy = false;
                 updateDisabled();
             }
         }, { signal: controller.signal });
 
-        syncOperation();
+        configureValueControl(false);
+        syncOperation(false);
         await refreshBooks(false);
     }
 

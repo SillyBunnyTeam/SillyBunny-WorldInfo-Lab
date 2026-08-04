@@ -29,22 +29,27 @@ export function mountRuntimeUi({ signal = null } = {}) {
         }
         const state = workbench.getState();
         if (state.availability?.ok === true) {
-            drawerStatus.textContent = 'World Info host ready.';
+            drawerStatus.textContent = 'Lorebook scanning is ready.';
             drawerStatus.className = 'sbwil-settings-status sbwil-settings-ready';
+            drawerStatus.removeAttribute('title');
         } else if (state.availability?.ok === false) {
-            drawerStatus.textContent = state.availability.reason ?? 'World Info host unavailable.';
+            drawerStatus.textContent = 'Lorebook scanning is unavailable. Update SillyBunny or World Info Lab, then reload.';
             drawerStatus.className = 'sbwil-settings-status sbwil-settings-error';
+            if (state.availability.reason) {
+                drawerStatus.title = `Technical details: ${state.availability.reason}`;
+            }
         } else {
-            drawerStatus.textContent = 'Checking World Info host modules...';
+            drawerStatus.textContent = 'Checking compatibility with SillyBunny...';
             drawerStatus.className = 'sbwil-settings-status';
+            drawerStatus.removeAttribute('title');
         }
 
         const result = state.latestResult;
         drawerResult.textContent = result
-            ? `Last run: ${result.activated?.length ?? 0} activated; ${result.budget?.used ?? 0} tokens.`
-            : 'No simulation has run in this session.';
+            ? `Last scan: ${result.activated?.length ?? 0} entries activated; ${result.budget?.used ?? 0} lorebook tokens.`
+            : 'No scans have run in this SillyBunny session yet.';
         if (state.stale) {
-            drawerResult.textContent += ' Source state changed since that run.';
+            drawerResult.textContent += ' The chat, lorebooks, or scan settings changed since then.';
         }
 
         if (document.activeElement !== historyLimitInput) {
@@ -72,7 +77,7 @@ export function mountRuntimeUi({ signal = null } = {}) {
             className: 'list-group-item flex-container flexGap5 interactable sbwil-menu-item',
             attributes: {
                 type: 'button',
-                title: 'Open the World Info Lab simulation workbench',
+                title: 'Open World Info Lab to test lorebook activation',
             },
         });
         const icon = element('span', {
@@ -106,7 +111,7 @@ export function mountRuntimeUi({ signal = null } = {}) {
         const summary = element('summary', { className: 'sbwil-settings-summary' });
         summary.append(
             element('span', { text: 'World Info Lab' }),
-            element('span', { className: 'sbwil-settings-summary-note', text: 'Simulation tools' }),
+            element('span', { className: 'sbwil-settings-summary-note', text: 'Test and troubleshoot lorebooks' }),
         );
 
         const content = element('div', { className: 'sbwil-settings-content' });
@@ -137,7 +142,7 @@ export function mountRuntimeUi({ signal = null } = {}) {
 
         const openButton = element('button', {
             className: 'menu_button sbwil-button sbwil-button-primary sbwil-settings-open',
-            text: 'Open workbench',
+            text: 'Open World Info Lab',
             attributes: { type: 'button' },
         });
         openButton.addEventListener('click', () => {
@@ -147,17 +152,17 @@ export function mountRuntimeUi({ signal = null } = {}) {
         content.append(
             drawerStatus,
             drawerResult,
-            field('Stored run limit', historyLimitInput, {
-                hint: 'Used when the optional history module is available.',
+            field('Recent scan history limit', historyLimitInput, {
+                hint: 'Number of summary-only scans to keep for this account (10 to 500). Chat and lorebook content are not stored.',
             }),
             openButton,
             element('p', {
                 className: 'sbwil-settings-note',
-                text: 'Scan is read-only. It never writes lorebook entries or metadata.',
+                text: 'Running a scan does not send a message or edit a lorebook. Lorebooks change only when you save a test or apply a batch edit.',
             }),
             element('p', {
                 className: 'sbwil-settings-note',
-                text: 'Saved test cases include replay inputs in the selected lorebook and remain until deleted from Tests. Cleaning extension data does not remove them.',
+                text: 'Saved tests are stored inside a lorebook and may contain private chat, character, and persona data. Delete private tests before sharing the lorebook. Cleaning World Info Lab data does not delete them.',
             }),
         );
         settingsDrawer.append(summary, content);

@@ -52,7 +52,10 @@ export async function loadHost() {
                     ...missing(script, ['getMaxPromptTokens']),
                 ];
                 if (required.length) {
-                    return { ok: false, reason: `World Info host exports missing: ${required.join(', ')}` };
+                    return {
+                        ok: false,
+                        reason: `World Info Lab is incompatible with this SillyBunny build. Missing tools: ${required.join(', ')}.`,
+                    };
                 }
                 loaded = {
                     ok: true,
@@ -64,11 +67,14 @@ export async function loadHost() {
                     utils,
                     tags,
                     script,
-                    warnings: regex ? [] : ['World Info regex processing is unavailable.'],
+                    warnings: regex ? [] : ['Lorebook regex scripts could not be applied, so inserted content may differ from an actual reply.'],
                 };
                 return loaded;
             } catch (error) {
-                return { ok: false, reason: `Could not load World Info host modules (${error?.message ?? error})` };
+                return {
+                    ok: false,
+                    reason: `World Info Lab could not load SillyBunny's lorebook tools. Technical details: ${error?.message ?? error}`,
+                };
             }
         })();
     }
@@ -82,7 +88,7 @@ export async function loadHost() {
 export async function countTokens(text) {
     const context = getContext();
     if (typeof context?.getTokenCountAsync !== 'function') {
-        throw new Error('The active tokenizer is unavailable.');
+        throw new Error('The scan could not count lorebook tokens because no tokenizer is available. Load or select a model tokenizer, then try again.');
     }
     return context.getTokenCountAsync(String(text ?? ''));
 }
@@ -98,7 +104,7 @@ export function substitute(text) {
 export async function loadWorldInfoFresh(name, { signal } = {}) {
     const context = getContext();
     if (typeof context?.getRequestHeaders !== 'function' || typeof globalThis.fetch !== 'function') {
-        throw new Error('Server-fresh World Info reads are unavailable; no changes were saved.');
+        throw new Error('Batch Edit could not verify the latest saved lorebook, so nothing was saved. Reload SillyBunny and try again.');
     }
     const response = await globalThis.fetch('/api/worldinfo/get', {
         method: 'POST',
@@ -108,7 +114,7 @@ export async function loadWorldInfoFresh(name, { signal } = {}) {
         signal,
     });
     if (!response.ok) {
-        throw new Error(`Lorebook ${name} could not be reloaded from the server (${response.status}).`);
+        throw new Error(`"${name}" could not be reloaded from the server (HTTP ${response.status}). Nothing was saved; check the server and preview again.`);
     }
     return response.json();
 }
@@ -117,6 +123,8 @@ export function notify(level, message) {
     const method = globalThis.toastr?.[level];
     if (typeof method === 'function') {
         method(message, 'World Info Lab');
+    } else if (typeof globalThis.alert === 'function') {
+        globalThis.alert(`World Info Lab\n\n${message}`);
     }
 }
 

@@ -15,7 +15,7 @@ function clone(value) {
 
 function checkAbort(signal) {
     if (signal?.aborted) {
-        throw new DOMException('Test run cancelled.', 'AbortError');
+        throw new DOMException('Saved test canceled.', 'AbortError');
     }
 }
 
@@ -65,7 +65,7 @@ async function loadCasesFromBook(context, bookName) {
 export async function listTestCases({ bookNames = null } = {}) {
     const context = getContext();
     if (typeof context?.loadWorldInfo !== 'function') {
-        throw new Error('World Info loading is unavailable.');
+        throw new Error("SillyBunny's lorebook loader is unavailable. Reload and try again.");
     }
     const names = bookNames ?? await discoverBooks(context);
     const groups = await Promise.all(names.map(name => loadCasesFromBook(context, name)));
@@ -90,28 +90,28 @@ function expectedFrom(result) {
 async function saveCaseNow(input) {
     const context = getContext();
     if (typeof context?.loadWorldInfo !== 'function' || typeof context?.saveWorldInfo !== 'function') {
-        throw new Error('World Info write APIs are unavailable.');
+        throw new Error('SillyBunny cannot save lorebooks in this session. Reload and try again.');
     }
     const result = input?.result;
     if (result?.kind !== 'simulated' || !result.replay) {
-        throw new TypeError('Run a replayable simulation before saving a test case.');
+        throw new TypeError('There is no scan result to save. Run a scan first.');
     }
     if (input?.confirmReplayStorage !== true) {
-        throw new TypeError('Confirm portable replay storage before saving a test case.');
+        throw new TypeError('Check the privacy acknowledgment before saving this test.');
     }
     const name = String(input.name ?? '').trim();
     if (!name) {
-        throw new TypeError('Test case name cannot be empty.');
+        throw new TypeError('Enter a name for this saved test.');
     }
     const sourceBooks = result.replay.sourcePlan?.all ?? [];
     const preferred = String(input.bookName ?? getSettings().selectedBook ?? '');
     const bookName = preferred || sourceBooks[0];
     if (!bookName) {
-        throw new Error('Choose a lorebook for this test case.');
+        throw new Error('Choose a lorebook in which to store this test.');
     }
     const book = await context.loadWorldInfo(bookName);
     if (!book?.entries || typeof book.entries !== 'object') {
-        throw new Error(`Lorebook ${bookName} could not be loaded.`);
+        throw new Error(`The lorebook "${bookName}" could not be loaded. Reload the lorebook and try again.`);
     }
     const now = new Date().toISOString();
     const item = {
@@ -124,7 +124,7 @@ async function saveCaseNow(input) {
         expected: expectedFrom(result),
     };
     if (new TextEncoder().encode(JSON.stringify(item)).length > MAX_CASE_BYTES) {
-        throw new RangeError('The test case exceeds the 2 MB storage limit.');
+        throw new RangeError('This saved test is larger than 2 MB. Use shorter pasted text or a smaller scan, then save it again.');
     }
     const next = clone(book);
     if (!next.extensions || typeof next.extensions !== 'object' || Array.isArray(next.extensions)) {
@@ -137,8 +137,13 @@ async function saveCaseNow(input) {
         testCases: [...storedCases(next), item],
     };
     await context.saveWorldInfo(bookName, next, true);
-    await context.reloadWorldInfoEditor?.(bookName, true);
-    return { ...clone(item), bookName };
+    let refreshWarning = '';
+    try {
+        await context.reloadWorldInfoEditor?.(bookName, true);
+    } catch (error) {
+        refreshWarning = `The test was saved, but SillyBunny could not refresh its lorebook editor. Reload the lorebook before retrying. Technical details: ${error?.message ?? error}`;
+    }
+    return { ...clone(item), bookName, refreshWarning };
 }
 
 export function saveTestCase(input) {
@@ -199,7 +204,7 @@ function compare(caseItem, result) {
 export async function runTestCase(caseItem, { signal } = {}) {
     checkAbort(signal);
     if (caseItem?.version !== TEST_CASE_VERSION || !caseItem.replay) {
-        throw new TypeError('The stored test case format is unsupported.');
+        throw new TypeError('This saved test was created by an incompatible version of World Info Lab. Update the extension and try again.');
     }
     const replay = caseItem.replay;
     const context = getContext();
@@ -231,7 +236,11 @@ export async function runTestCase(caseItem, { signal } = {}) {
         ...comparison,
         result,
         summary: comparison.passed
-            ? `${caseItem.name} passed.`
-            : `${caseItem.name} changed: ${comparison.differences.join(', ')}.`,
+            ? `"${caseItem.name}" passed. Activated entries, token use, and insertion results match the saved scan.`
+            : `"${caseItem.name}" did not match the saved scan. Changed: ${comparison.differences.map(item => ({
+                fingerprint: 'scan inputs or overall result',
+                placements: 'insertion locations or rendered content',
+                'token budget': 'token use or limit',
+            })[item] ?? item).join(', ')}. Open Scan and Trace to inspect the new result.`,
     };
 }

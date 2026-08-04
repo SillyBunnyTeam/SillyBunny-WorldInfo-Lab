@@ -1,8 +1,9 @@
 import {
     GENERATION_TRIGGERS,
+    LOGIC_LABEL,
     POSITION_LABEL,
 } from '../constants.js';
-import { getContext, notify } from '../host.js';
+import { getContext, loadHost, notify } from '../host.js';
 import { appendHistory } from '../history.js';
 import { buildSimulationRequest } from '../scan-input.js';
 import { getSettings, updateSettings } from '../settings.js';
@@ -21,9 +22,77 @@ import { createBatchTab, createTestsTab } from './future-tabs.js';
 const TABS = [
     { id: 'scan', label: 'Scan' },
     { id: 'trace', label: 'Trace' },
-    { id: 'tests', label: 'Tests' },
+    { id: 'tests', label: 'Saved Tests' },
     { id: 'batch', label: 'Batch Edit' },
 ];
+
+const TRIGGER_LABEL = Object.freeze({
+    normal: 'New reply',
+    continue: 'Continue response',
+    impersonate: 'Impersonate user',
+    swipe: 'Swipe response',
+    regenerate: 'Regenerate response',
+    quiet: 'Quiet or background reply',
+});
+
+const ACTIVATION_REASON_LABEL = Object.freeze({
+    decorator: 'Forced by @@activate',
+    forced: 'Forced by test input',
+    constant: 'Always active',
+    sticky: 'Sticky entry',
+    primary: 'Primary key matched',
+    'primary-secondary': 'Primary and secondary keys matched',
+});
+
+const OUTCOME_LABEL = Object.freeze({
+    activated: 'Activated',
+    disabled: 'Skipped: entry disabled',
+    'trigger-filtered': 'Skipped: reply action does not match',
+    'character-filtered': 'Skipped: character filter',
+    'timed-effect': 'Skipped: delay or cooldown',
+    'recursion-gated': 'Skipped in this scan round',
+    'decorator-blocked': 'Blocked by entry directive',
+    'primary-miss': 'No primary key matched',
+    'no-primary-keys': 'No usable primary keys',
+    'secondary-miss': 'Secondary-key rule not met',
+    'group-rejected': 'Not chosen from inclusion group',
+    'probability-rejected': 'Probability check failed',
+    'probability-failed-earlier': 'Probability failed in an earlier round',
+    'budget-rejected': 'Did not fit the token budget',
+    'not-evaluated-after-overflow': 'Not checked after the token budget filled',
+    'already-activated': 'Already activated in an earlier round',
+    candidate: 'Reached final activation checks',
+    'not-evaluated': 'Not activated',
+    rejected: 'Not activated',
+});
+
+const STAGE_LABEL = Object.freeze({
+    'Generation trigger': 'Reply action',
+    'Timed effects': 'Sticky, cooldown, and delay',
+    'Recursion gate': 'Recursive-scan rule',
+    Decorator: 'Entry directive',
+    Keys: 'Key matching',
+    Activation: 'Activation source',
+});
+
+const STAGE_STATUS_LABEL = Object.freeze({
+    pass: 'Passed',
+    fail: 'Blocked',
+    skip: 'Skipped',
+    active: 'Continues',
+});
+
+const ROUND_LABEL = Object.freeze({
+    Initial: 'Initial scan',
+    Recursion: 'Recursive scan',
+    'Minimum activations': 'Deeper scan for minimum activations',
+    Stopped: 'Scan ended',
+});
+
+const OMISSION_LABEL = Object.freeze({
+    'empty-after-regex': 'Not inserted: regex processing produced empty content',
+    'missing-outlet-name': 'Not inserted: the entry has no outlet name',
+});
 
 function plural(count, singular, pluralForm = `${singular}s`) {
     return `${count} ${count === 1 ? singular : pluralForm}`;
@@ -57,16 +126,16 @@ function contextLine(snapshot = null) {
 
 function staleMessage(reason) {
     if (reason === 'chat-changed') {
-        return 'The chat changed. This result is retained for comparison; run the simulation again to refresh it.';
+        return 'These results are out of date because the chat changed. Run the scan again to update them.';
     }
     if (reason === 'worldinfo-updated' || reason === 'worldinfo-settings-updated') {
-        return 'World Info sources changed. This result is retained for comparison; run the simulation again to refresh it.';
+        return 'These results are out of date because a lorebook or its settings changed. Run the scan again to update them.';
     }
     if (reason === 'scan-input-changed') {
-        return 'Chat, character, group, or persona scan input changed. This result is retained for comparison; run the simulation again to refresh it.';
+        return 'These results are out of date because the chat, character, group, persona, or character tags changed. Run the scan again.';
     }
     if (reason === 'local-input-changed') {
-        return 'Scan controls changed. This result is retained for comparison; run the simulation again to refresh it.';
+        return 'These results are out of date because a scan option changed. Run the scan again.';
     }
     return '';
 }
@@ -78,17 +147,56 @@ function detailText(value, omitted = []) {
     return detail.join('; ');
 }
 
+function quoteList(values) {
+    return values.map(value => `"${value}"`).join(', ');
+}
+
+function describeKeyMatch(trace) {
+    const match = trace?.match;
+    if (!match) {
+        return '';
+    }
+    if (trace.outcome === 'no-primary-keys') {
+        return 'This entry has no usable primary keys.';
+    }
+    if (trace.outcome === 'primary-miss') {
+        const tried = (match.primary ?? []).map(item => item.expanded).filter(Boolean);
+        return tried.length
+            ? `No primary key matched. Tried: ${quoteList(tried)}.`
+            : 'No primary key matched.';
+    }
+    const primary = match.primaryMatch;
+    if (!primary) {
+        return '';
+    }
+    if (trace.outcome === 'secondary-miss') {
+        const rule = LOGIC_LABEL[match.logic] ?? `rule ${match.logic}`;
+        return `Primary key "${primary.expanded}" matched, but the secondary keys did not satisfy ${rule}.`;
+    }
+    const matchedText = primary.value ? ` "${primary.value}"` : '';
+    const matchType = {
+        regex: 'with a regular expression',
+        'whole-word': 'as a whole word',
+        phrase: 'as a phrase',
+        plain: 'as text',
+    }[primary.kind] ?? 'in the scan text';
+    const secondary = match.reason === 'primary-secondary'
+        ? ` The secondary-key rule ${LOGIC_LABEL[match.logic] ?? match.logic} also passed.`
+        : '';
+    return `Primary key "${primary.expanded}" matched${matchedText} ${matchType}.${secondary}`;
+}
+
 function resultWarnings(result) {
     const section = element('section', {
         className: 'sbwil-warnings',
         attributes: { 'aria-labelledby': 'sbwil-warnings-title' },
     });
-    section.append(element('h4', { id: 'sbwil-warnings-title', text: 'Warnings' }));
+    section.append(element('h4', { id: 'sbwil-warnings-title', text: 'Warnings and accuracy notes' }));
     const warnings = result?.warnings ?? [];
     if (!warnings.length) {
         section.append(element('p', {
             className: 'sbwil-empty-line',
-            text: 'No simulation warnings.',
+            text: 'No warnings or known accuracy limits for this scan.',
         }));
         return section;
     }
@@ -105,10 +213,10 @@ function renderScanResult(container, result, stale) {
     if (!result) {
         const empty = element('section', { className: 'sbwil-empty-state' });
         empty.append(
-            element('p', { className: 'sbwil-kicker', text: 'NO RESULT' }),
-            element('h3', { text: 'Ready to inspect activation' }),
+            element('p', { className: 'sbwil-kicker', text: 'NO SCAN YET' }),
+            element('h3', { text: 'See which lorebook entries would activate' }),
             element('p', {
-                text: 'Run a deterministic simulation to see activated entries, token use, and source warnings.',
+                text: 'Choose Current chat or Pasted text, then select Run scan. No reply will be generated and no lorebook will be edited.',
             }),
         );
         container.append(empty);
@@ -119,12 +227,12 @@ function renderScanResult(container, result, stale) {
     const heading = element('div', { className: 'sbwil-result-heading' });
     heading.append(element('div'));
     heading.firstElementChild.append(
-        element('p', { className: 'sbwil-kicker', text: 'LATEST SIMULATION' }),
-        element('h3', { text: 'Activation summary' }),
+        element('p', { className: 'sbwil-kicker', text: 'LATEST COMPLETED SCAN' }),
+        element('h3', { text: 'Which entries would activate' }),
     );
     heading.append(element('code', {
         className: 'sbwil-fingerprint',
-        text: result.fingerprint ?? 'no fingerprint',
+        text: `Result ID: ${result.fingerprint ?? 'unavailable'}`,
     }));
     section.append(heading);
 
@@ -138,10 +246,10 @@ function renderScanResult(container, result, stale) {
     const budget = result.budget ?? {};
     const metrics = element('div', { className: 'sbwil-metrics' });
     metrics.append(
-        metric('Activated', result.activated?.length ?? 0),
-        metric('Rounds', result.rounds?.length ?? 0),
-        metric('Tokens', `${budget.used ?? 0} / ${budget.limit ?? 0}`),
-        metric('Seed', result.seed ?? 0),
+        metric('Entries activated', result.activated?.length ?? 0),
+        metric('Scan rounds', result.rounds?.length ?? 0),
+        metric('Lorebook tokens', `${budget.used ?? 0} / ${budget.limit ?? 0}`),
+        metric('Random seed', result.seed ?? 0),
     );
     section.append(metrics);
 
@@ -151,7 +259,7 @@ function renderScanResult(container, result, stale) {
         element('span', { text: 'Token budget' }),
         element('strong', {
             text: budget.overflowed
-                ? `${budget.used ?? 0} used; limit reached`
+                ? `${budget.used ?? 0} of ${budget.limit ?? 0} tokens used; another entry did not fit`
                 : `${budget.used ?? 0} of ${budget.limit ?? 0} used`,
         }),
     );
@@ -170,11 +278,17 @@ function renderScanResult(container, result, stale) {
         className: 'sbwil-activated',
         attributes: { 'aria-labelledby': 'sbwil-activated-title' },
     });
-    activatedSection.append(element('h4', { id: 'sbwil-activated-title', text: 'Activated entries' }));
+    activatedSection.append(
+        element('h4', { id: 'sbwil-activated-title', text: 'Activated entries' }),
+        element('p', {
+            className: 'sbwil-field-hint',
+            text: 'These entries passed the scan rules. An activated entry can still produce no prompt content; check Insertion results in Trace.',
+        }),
+    );
     if (!result.activated?.length) {
         activatedSection.append(element('p', {
             className: 'sbwil-empty-line',
-            text: 'No entries activated for this input.',
+            text: 'No entries would activate. Open Trace to see which rule blocked each entry, and check that the expected lorebooks are active.',
         }));
     } else {
         const list = element('ol', { className: 'sbwil-activated-list' });
@@ -189,7 +303,7 @@ function renderScanResult(container, result, stale) {
                 identity,
                 element('span', {
                     className: 'sbwil-reason',
-                    text: humanize(entry.activationReason || 'activated'),
+                    text: ACTIVATION_REASON_LABEL[entry.activationReason] ?? 'Activated',
                 }),
             );
             list.append(item);
@@ -215,10 +329,13 @@ function signalItem(title, meta, status = 'neutral') {
     if (normalized !== 'neutral') {
         titleRow.append(element('span', {
             className: 'sbwil-signal-status',
-            text: humanize(normalized),
+            text: STAGE_STATUS_LABEL[normalized] ?? humanize(normalized),
         }));
     }
-    body.append(titleRow, element('span', { text: meta || 'No additional detail.' }));
+    body.append(titleRow);
+    if (meta) {
+        body.append(element('span', { text: meta }));
+    }
     item.append(body);
     return item;
 }
@@ -229,27 +346,33 @@ function renderRounds(result) {
         attributes: { 'aria-labelledby': 'sbwil-rounds-title' },
     });
     section.append(element('h4', { id: 'sbwil-rounds-title', text: 'Scan rounds' }));
+    section.append(element('p', {
+        className: 'sbwil-field-hint',
+        text: 'Additional rounds happen when recursion or minimum-activation settings scan more text.',
+    }));
     const rail = element('ol', { className: 'sbwil-signal-rail' });
     (result.rounds ?? []).forEach((round) => {
         const details = [
-            `Depth ${round.depth ?? 0}`,
-            plural(round.candidates?.length ?? 0, 'candidate'),
+            `Chat depth: ${plural(round.depth ?? 0, 'message')}`,
+            `${plural(round.candidates?.length ?? 0, 'entry', 'entries')} reached activation checks`,
             plural(round.activated?.length ?? 0, 'activation'),
         ];
         if (round.activated?.length) {
-            details.push(`Activated ${round.activated.join(', ')}`);
+            details.push(`Activated entry IDs: ${round.activated.join(', ')}`);
         }
         if (round.nextStateLabel) {
-            details.push(`Next: ${round.nextStateLabel}`);
+            details.push(round.nextStateLabel === 'Stopped'
+                ? 'Scan ended'
+                : `Next round: ${ROUND_LABEL[round.nextStateLabel] ?? round.nextStateLabel}`);
         }
         rail.append(signalItem(
-            `Round ${round.number}: ${round.stateLabel ?? 'Unknown'}`,
+            `Round ${round.number}: ${ROUND_LABEL[round.stateLabel] ?? round.stateLabel ?? 'Unknown scan state'}`,
             details.join('; '),
             round.stateLabel === 'Recursion' ? 'active' : 'neutral',
         ));
     });
     if (!result.rounds?.length) {
-        rail.append(signalItem('No rounds recorded', 'The simulator returned no round data.', 'skip'));
+        rail.append(signalItem('No scan rounds were returned', 'Try running the scan again. If this repeats, include the technical details in a bug report.', 'skip'));
     }
     section.append(rail);
     return section;
@@ -260,12 +383,12 @@ function renderPlacements(result) {
         className: 'sbwil-trace-section',
         attributes: { 'aria-labelledby': 'sbwil-placements-title' },
     });
-    section.append(element('h4', { id: 'sbwil-placements-title', text: 'Placements' }));
+    section.append(element('h4', { id: 'sbwil-placements-title', text: 'Insertion results' }));
     const records = result.placements?.records ?? [];
     if (!records.length) {
         section.append(element('p', {
             className: 'sbwil-empty-line',
-            text: 'No placement records were produced.',
+            text: 'No entries activated, so there is no lorebook content to insert.',
         }));
         return section;
     }
@@ -282,20 +405,22 @@ function renderPlacements(result) {
         const placement = POSITION_LABEL[record.position] ?? `Position ${record.position}`;
         const qualifiers = [placement];
         if (record.depth !== null && record.depth !== undefined) {
-            qualifiers.push(`depth ${record.depth}`);
+            qualifiers.push(`chat depth ${record.depth}`);
         }
         if (record.outlet) {
-            qualifiers.push(`outlet ${record.outlet}`);
+            qualifiers.push(`outlet: ${record.outlet}`);
         }
         summary.append(
             identity,
             element('span', {
                 className: record.included ? 'sbwil-chip' : 'sbwil-chip sbwil-chip-muted',
-                text: record.included ? qualifiers.join('; ') : humanize(record.omissionReason || 'omitted'),
+                text: record.included
+                    ? qualifiers.join('; ')
+                    : (OMISSION_LABEL[record.omissionReason] ?? 'Not inserted'),
             }),
         );
         const content = element('pre', { className: 'sbwil-log' });
-        content.textContent = record.renderedContent || record.rawContent || '(empty content)';
+        content.textContent = record.renderedContent || record.rawContent || '(No content)';
         details.append(summary, content);
         list.append(details);
     });
@@ -308,12 +433,12 @@ function renderEntryTraces(result) {
         className: 'sbwil-trace-section',
         attributes: { 'aria-labelledby': 'sbwil-entry-traces-title' },
     });
-    section.append(element('h4', { id: 'sbwil-entry-traces-title', text: 'Entry stages' }));
+    section.append(element('h4', { id: 'sbwil-entry-traces-title', text: 'Why entries activated or were skipped' }));
     const traces = result.traces ?? [];
     if (!traces.length) {
         section.append(element('p', {
             className: 'sbwil-empty-line',
-            text: 'No per-entry stages were recorded.',
+            text: 'No entry checks were recorded. The loaded lorebooks may contain no entries.',
         }));
         return section;
     }
@@ -333,7 +458,7 @@ function renderEntryTraces(result) {
         }
         const activated = roundTraces.filter(trace => trace.outcome === 'activated').length;
         roundDetails.append(element('summary', {
-            text: `Round ${round}: ${plural(roundTraces.length, 'entry trace')}; ${plural(activated, 'activation')}`,
+            text: `Round ${round}: ${plural(roundTraces.length, 'entry', 'entries')} checked; ${plural(activated, 'activation')}`,
         }));
 
         const entries = element('div', { className: 'sbwil-entry-trace-list' });
@@ -349,21 +474,29 @@ function renderEntryTraces(result) {
                 identity,
                 element('span', {
                     className: `sbwil-chip sbwil-outcome-${trace.outcome === 'activated' ? 'pass' : 'neutral'}`,
-                    text: humanize(trace.outcome),
+                    text: OUTCOME_LABEL[trace.outcome] ?? 'Not activated',
                 }),
             );
             details.append(summary);
 
+            const keySummary = describeKeyMatch(trace);
+            if (keySummary) {
+                details.append(element('p', {
+                    className: 'sbwil-match-summary',
+                    text: keySummary,
+                }));
+            }
+
             const rail = element('ol', { className: 'sbwil-signal-rail sbwil-stage-rail' });
             (trace.stages ?? []).forEach((stage) => {
                 rail.append(signalItem(
-                    stage.name,
+                    STAGE_LABEL[stage.name] ?? stage.name,
                     detailText(stage, ['name', 'status']),
                     stage.status,
                 ));
             });
             if (!trace.stages?.length) {
-                rail.append(signalItem('Not evaluated', 'No stages were recorded.', 'skip'));
+                rail.append(signalItem('Not checked', 'No rule checks were recorded for this entry.', 'skip'));
             }
             details.append(rail);
             entries.append(details);
@@ -379,9 +512,9 @@ function renderTrace(container, result, stale) {
     if (!result) {
         const empty = element('section', { className: 'sbwil-empty-state' });
         empty.append(
-            element('p', { className: 'sbwil-kicker', text: 'TRACE IDLE' }),
-            element('h3', { text: 'No trace recorded' }),
-            element('p', { text: 'Run a Scan simulation first. Entry stages and placements will appear here.' }),
+            element('p', { className: 'sbwil-kicker', text: 'NO TRACE YET' }),
+            element('h3', { text: 'Run a scan to create a Trace' }),
+            element('p', { text: 'Trace will show why each entry activated or was skipped and where activated content would be inserted.' }),
         );
         container.append(empty);
         return;
@@ -390,7 +523,7 @@ function renderTrace(container, result, stale) {
     const header = element('header', { className: 'sbwil-trace-header' });
     const title = element('div');
     title.append(
-        element('p', { className: 'sbwil-kicker', text: 'DETERMINISTIC TRACE' }),
+        element('p', { className: 'sbwil-kicker', text: 'SCAN TRACE' }),
         element('h3', { text: 'Why each entry did or did not activate' }),
     );
     const budget = result.budget ?? {};
@@ -398,7 +531,9 @@ function renderTrace(container, result, stale) {
         title,
         element('p', {
             className: 'sbwil-trace-budget',
-            text: `${budget.used ?? 0} / ${budget.limit ?? 0} tokens${budget.overflowed ? '; limit reached' : ''}`,
+            text: budget.overflowed
+                ? `${budget.used ?? 0} of ${budget.limit ?? 0} lorebook tokens used; at least one entry did not fit`
+                : `${budget.used ?? 0} of ${budget.limit ?? 0} lorebook tokens used`,
         }),
     );
     container.append(header);
@@ -466,11 +601,11 @@ export function createWorkbench({
         const header = element('header', { className: 'sbwil-workbench-header' });
         const heading = element('div', { className: 'sbwil-title-block' });
         heading.append(
-            element('p', { className: 'sbwil-kicker', text: 'SIMULATION WORKBENCH' }),
+            element('p', { className: 'sbwil-kicker', text: 'LOREBOOK TROUBLESHOOTING' }),
             element('h2', { text: 'World Info Lab' }),
             element('p', {
                 className: 'sbwil-muted',
-                text: 'Inspect deterministic activation without invoking generation.',
+                text: 'See which lorebook entries would activate without generating a reply or editing a lorebook.',
             }),
         );
         const headerMeta = element('div', { className: 'sbwil-header-meta' });
@@ -528,7 +663,7 @@ export function createWorkbench({
         });
         controls.append(
             element('p', { className: 'sbwil-kicker', text: 'INPUT' }),
-            element('h3', { id: 'sbwil-scan-controls-title', text: 'Build a scan' }),
+            element('h3', { id: 'sbwil-scan-controls-title', text: 'Choose what to scan' }),
         );
         const form = element('form', { className: 'sbwil-scan-form' });
         const modeGroup = element('fieldset', { className: 'sbwil-mode-group' });
@@ -558,12 +693,12 @@ export function createWorkbench({
             className: 'text_pole sbwil-textarea',
             attributes: {
                 rows: '10',
-                placeholder: 'Paste the exact text to scan...',
+                placeholder: 'Paste text to test against your lorebooks',
                 spellcheck: 'true',
             },
         });
         const textField = field('Text to scan', textInput, {
-            hint: 'Pasted text is not saved in extension settings.',
+            hint: 'Kept only for this SillyBunny session unless you save the result as a test.',
         });
 
         const triggerSelect = element('select', {
@@ -572,7 +707,7 @@ export function createWorkbench({
         });
         GENERATION_TRIGGERS.forEach((trigger) => {
             triggerSelect.append(element('option', {
-                text: humanize(trigger),
+                text: TRIGGER_LABEL[trigger] ?? humanize(trigger),
                 attributes: { value: trigger },
             }));
         });
@@ -596,25 +731,35 @@ export function createWorkbench({
 
         const parameterGrid = element('div', { className: 'sbwil-parameter-grid' });
         parameterGrid.append(
-            field('Generation trigger', triggerSelect),
-            field('Deterministic seed', seedInput),
+            field('Reply action to simulate', triggerSelect, {
+                hint: 'Choose what SillyBunny would be doing when it checks the lorebooks.',
+            }),
+            field('Random-choice seed', seedInput, {
+                hint: 'The same seed repeats probability and inclusion-group choices.',
+            }),
         );
 
         const sourceLine = element('p', { className: 'sbwil-context-line' });
         const actions = element('div', { className: 'sbwil-run-actions' });
         const runButton = element('button', {
             className: 'menu_button sbwil-button sbwil-button-primary sbwil-run-button',
-            text: 'Run simulation',
+            text: 'Run scan',
             attributes: { type: 'submit' },
         });
         const cancelButton = element('button', {
             className: 'menu_button sbwil-button',
-            text: 'Cancel run',
+            text: 'Cancel scan',
             attributes: { type: 'button' },
         });
         cancelButton.hidden = true;
-        actions.append(runButton, cancelButton);
-        const runStatus = statusRegion('Ready to simulate.');
+        const checkCompatibilityButton = element('button', {
+            className: 'menu_button sbwil-button',
+            text: 'Check compatibility again',
+            attributes: { type: 'button' },
+        });
+        checkCompatibilityButton.hidden = true;
+        actions.append(runButton, cancelButton, checkCompatibilityButton);
+        const runStatus = statusRegion('Ready. Run the scan to see which entries would activate.');
         form.append(
             modeGroup,
             textField,
@@ -628,7 +773,7 @@ export function createWorkbench({
         const scanOutput = element('div', {
             className: 'sbwil-scan-output',
             attributes: {
-                'aria-label': 'Simulation result',
+                'aria-label': 'Scan results',
             },
         });
         scanLayout.append(controls, scanOutput);
@@ -638,6 +783,7 @@ export function createWorkbench({
         const testsTab = createTestsTab({
             panel: panels.get('tests'),
             getLatestResult: () => latestResult,
+            isLatestResultStale: () => Boolean(stale),
             acceptResult,
         });
         const batchTab = createBatchTab({ panel: panels.get('batch') });
@@ -660,28 +806,35 @@ export function createWorkbench({
 
         function setRunning(running) {
             form.setAttribute('aria-busy', String(running));
-            runButton.textContent = running ? 'Restart simulation' : 'Run simulation';
+            runButton.textContent = running ? 'Restart scan' : 'Run scan';
             cancelButton.hidden = !running;
         }
 
         function updateHeader() {
             if (availability?.ok === true) {
-                hostStatus.textContent = 'Host ready';
+                hostStatus.textContent = 'Ready to scan';
                 hostStatus.className = 'sbwil-host-status sbwil-host-ready';
+                hostStatus.removeAttribute('title');
             } else if (availability?.ok === false) {
-                hostStatus.textContent = 'Host unavailable';
+                hostStatus.textContent = 'Cannot scan';
                 hostStatus.className = 'sbwil-host-status sbwil-host-error';
+                hostStatus.title = `Technical details: ${availability.reason ?? 'SillyBunny compatibility check failed.'}`;
             } else {
-                hostStatus.textContent = 'Checking host';
+                hostStatus.textContent = 'Checking compatibility';
                 hostStatus.className = 'sbwil-host-status';
+                hostStatus.removeAttribute('title');
             }
             sourceStatus.textContent = contextLine(latestSnapshot);
             sourceLine.textContent = currentMode() === 'chat'
-                ? `Current source: ${contextLine(latestSnapshot)}`
-                : 'Current source: pasted text';
+                ? `Input: current chat; ${contextLine(latestSnapshot)}${latestSnapshot ? '' : '; lorebooks load when the scan starts'}`
+                : 'Input: pasted text';
             runButton.disabled = availability?.ok === false;
+            checkCompatibilityButton.hidden = availability?.ok !== false;
             if (availability?.ok === false) {
-                runButton.title = availability.reason ?? 'World Info host modules are unavailable.';
+                runButton.title = 'Update SillyBunny or World Info Lab, then reload.';
+                if (!runController) {
+                    runStatus.textContent = `Lorebook scanning is unavailable. Update SillyBunny or World Info Lab, then reload. Technical details: ${availability.reason ?? 'Compatibility check failed.'}`;
+                }
             } else {
                 runButton.removeAttribute('title');
             }
@@ -690,6 +843,7 @@ export function createWorkbench({
         function renderResult() {
             renderScanResult(scanOutput, latestResult, stale);
             renderTrace(tracePanel, latestResult, stale);
+            testsTab.syncResultState();
             updateHeader();
         }
 
@@ -709,12 +863,12 @@ export function createWorkbench({
         function invalidateLocalInput() {
             const wasRunning = Boolean(runController);
             if (wasRunning) {
-                abortRun('Inputs changed. Run the simulation again.');
+                abortRun('Scan input changed. Run the scan again.');
             }
             if (latestResult) {
                 stale = staleMessage('local-input-changed');
                 if (!wasRunning) {
-                    runStatus.textContent = 'Inputs changed. Run the simulation again.';
+                    runStatus.textContent = 'Scan input changed. Run the scan again.';
                 }
                 renderResult();
                 emitState();
@@ -724,7 +878,7 @@ export function createWorkbench({
         async function runSimulation() {
             textInput.setCustomValidity(
                 currentMode() === 'text' && !textInput.value.trim()
-                    ? 'Enter text to scan.'
+                    ? 'Paste or enter some text to test.'
                     : '',
             );
             if (!form.reportValidity()) {
@@ -750,7 +904,7 @@ export function createWorkbench({
                 }
                 latestSnapshot = snapshot;
                 updateHeader();
-                runStatus.textContent = 'Building deterministic scan input...';
+                runStatus.textContent = 'Preparing chat, character, and scan settings...';
                 const request = await buildSimulationRequest(snapshot, {
                     context: getContext(),
                     mode,
@@ -761,7 +915,7 @@ export function createWorkbench({
                 if (disposed || controller.signal.aborted || sequence !== runSequence) {
                     return;
                 }
-                runStatus.textContent = `Simulating ${plural(snapshot.entries.length, 'entry', 'entries')}...`;
+                runStatus.textContent = `Checking ${plural(snapshot.entries.length, 'lorebook entry', 'lorebook entries')}...`;
                 const result = await simulateWorldInfo(request, { signal: controller.signal });
                 if (disposed || controller.signal.aborted || sequence !== runSequence) {
                     return;
@@ -769,19 +923,20 @@ export function createWorkbench({
                 try {
                     appendHistory(result);
                 } catch (error) {
-                    result.warnings.push(`Run history could not be saved. ${errorMessage(error)}`);
+                    result.warnings.push(`The scan completed, but its recent-scan summary could not be saved. Technical details: ${errorMessage(error)}`);
                 }
                 acceptResult(result);
                 void testsTab.refresh();
-                runStatus.textContent = `Simulation complete. ${plural(result.activated?.length ?? 0, 'entry', 'entries')} activated.`;
+                runStatus.textContent = `Scan complete: ${plural(result.activated?.length ?? 0, 'entry', 'entries')} activated.`;
             } catch (error) {
                 if (disposed || sequence !== runSequence) {
                     return;
                 }
                 if (isAbort(error) || controller.signal.aborted) {
-                    runStatus.textContent = 'Simulation cancelled.';
+                    runStatus.textContent = 'Scan canceled.';
                 } else {
-                    const message = `Simulation failed. ${errorMessage(error)}`;
+                    const retained = latestResult ? ' The previous completed result is still shown.' : '';
+                    const message = `Scan failed.${retained} Technical details: ${errorMessage(error)}`;
                     runStatus.textContent = message;
                     notify('error', message);
                 }
@@ -865,7 +1020,19 @@ export function createWorkbench({
             void runSimulation();
         }, { signal });
         cancelButton.addEventListener('click', () => {
-            abortRun('Simulation cancelled.');
+            abortRun('Scan canceled.');
+        }, { signal });
+        checkCompatibilityButton.addEventListener('click', async () => {
+            availability = null;
+            runStatus.textContent = 'Checking compatibility with SillyBunny...';
+            updateHeader();
+            const result = await loadHost();
+            if (disposed) {
+                return;
+            }
+            availability = result;
+            renderResult();
+            emitState();
         }, { signal });
 
         syncMode(false);
@@ -881,8 +1048,8 @@ export function createWorkbench({
             refresh(reason) {
                 const message = staleMessage(reason);
                 if (message) {
-                    abortRun('Inputs changed. Run the simulation again.');
-                    testsTab.invalidate('Stored test case run cancelled because scan inputs changed.');
+                    abortRun('Scan input changed. Run the scan again.');
+                    testsTab.invalidate('Saved test canceled because the chat or lorebooks changed. Run it again.');
                     void batchTab.refresh();
                 }
                 renderResult();
@@ -911,7 +1078,7 @@ export function createWorkbench({
         try {
             api = await popupApi();
         } catch (error) {
-            notify('error', `Could not open World Info Lab. ${errorMessage(error)}`);
+            notify('error', `World Info Lab could not open. Reload SillyBunny and try again. Technical details: ${errorMessage(error)}`);
             return;
         }
         if (destroyed) {
@@ -943,7 +1110,7 @@ export function createWorkbench({
             await shown;
         } catch (error) {
             if (!destroyed) {
-                notify('error', `Could not open World Info Lab. ${errorMessage(error)}`);
+                notify('error', `World Info Lab could not open. Reload SillyBunny and try again. Technical details: ${errorMessage(error)}`);
             }
         } finally {
             session?.dispose();

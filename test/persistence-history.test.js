@@ -87,7 +87,7 @@ test('test cases persist beside lorebook metadata and replay deterministically',
         name: 'missing consent',
         bookName: 'Book',
         result: simulation,
-    }), /Confirm portable replay storage/);
+    }), /privacy acknowledgment/);
     const savedCase = await saveTestCase({
         name: '  deterministic greeting  ',
         bookName: 'Book',
@@ -116,14 +116,17 @@ test('test cases persist beside lorebook metadata and replay deterministically',
     assert.equal(replay.passed, true);
     assert.deepEqual(replay.differences, []);
     assert.equal(replay.result.fingerprint, simulation.fingerprint);
-    assert.equal(replay.summary, 'deterministic greeting passed.');
+    assert.equal(
+        replay.summary,
+        '"deterministic greeting" passed. Activated entries, token use, and insertion results match the saved scan.',
+    );
 
     const changedExpectation = clone(listed[0]);
     changedExpectation.expected.fingerprint = 'different';
     const changed = await runTestCase(changedExpectation);
     assert.equal(changed.passed, false);
     assert.deepEqual(changed.differences, ['fingerprint']);
-    assert.match(changed.summary, /changed: fingerprint/);
+    assert.match(changed.summary, /did not match the saved scan.*scan inputs or overall result/);
 
     assert.equal(await deleteTestCase(savedCase.id, { bookName: 'Book' }), true);
     assert.deepEqual(await listTestCases({ bookNames: ['Book'] }), []);

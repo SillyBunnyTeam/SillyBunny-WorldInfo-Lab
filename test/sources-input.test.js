@@ -163,7 +163,7 @@ test('lorebook snapshots normalize entries, decorators, missing books, and sourc
     assert.equal(characterFirst.entries.find(entry => entry.comment === 'global-high').uid, 'alpha');
     assert.equal(characterFirst.entries.find(entry => entry.comment === 'global-low').uid, 'custom');
     assert.deepEqual(characterFirst.missing, ['Missing']);
-    assert.match(characterFirst.warnings.join('\n'), /Could not load: Missing/);
+    assert.match(characterFirst.warnings.join('\n'), /Could not load these lorebooks: Missing/);
     assert.deepEqual(characterFirst.entryIndex.get('Character.4'), [2]);
 
     const globalFirst = await snapshotLorebooks({
@@ -262,8 +262,8 @@ test('simulation requests reconstruct chat, freeze macros, expose regex depth, a
     });
     assert.equal(request.globalScanData.scenario, 'scenario');
     assert.equal(request.globalScanData.trigger, 'swipe');
-    assert.match(request.warnings.join('\n'), /Vector similarity is not simulated/);
-    assert.match(request.warnings.join('\n'), /Current-chat input is reconstructed/);
+    assert.match(request.warnings.join('\n'), /Vector matching is not simulated/);
+    assert.match(request.warnings.join('\n'), /This scan uses the saved chat/);
 
     const volatile = '{{random}}';
     assert.equal(request.expand(volatile), '{{random}}:expanded-1');

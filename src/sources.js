@@ -163,7 +163,7 @@ export async function snapshotLorebooks({
     settings: settingsOverride = null,
 } = {}) {
     if (!context || typeof context.loadWorldInfo !== 'function') {
-        throw new Error('World Info loading is unavailable.');
+        throw new Error("SillyBunny's lorebook loader is unavailable. Reload and try again.");
     }
     const host = await loadHost();
     if (!host.ok) {
@@ -213,8 +213,8 @@ export async function snapshotLorebooks({
         missing,
         warnings: [
             ...(host.warnings ?? []),
-            ...(missing.length ? [`Could not load: ${missing.join(', ')}`] : []),
-            'The simulation does not invoke WORLDINFO_ENTRIES_LOADED listeners that can mutate native scan entries.',
+            ...(missing.length ? [`Could not load these lorebooks: ${missing.join(', ')}. Check that they still exist, then run the scan again.`] : []),
+            'Other extensions that modify lorebook entries while a reply is being prepared are not run by this scan, so results may differ.',
         ],
         entryIndex: entries.reduce((index, entry, position) => {
             const id = entryId(entry);

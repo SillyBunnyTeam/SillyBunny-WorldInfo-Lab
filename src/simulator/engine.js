@@ -255,7 +255,7 @@ function normalizeTimedEffects(value = {}) {
 
 function checkAbort(signal) {
     if (signal?.aborted) {
-        throw new DOMException('Simulation cancelled.', 'AbortError');
+        throw new DOMException('Scan canceled.', 'AbortError');
     }
 }
 
@@ -556,7 +556,10 @@ export async function simulateWorldInfo(request, { signal } = {}) {
     const usedTokens = await tokenCount(allActivatedText);
     const warnings = [...(request.warnings ?? [])];
     if (request.volatileMacros?.size) {
-        warnings.push(`${request.volatileMacros.size} volatile macro input(s) were expanded once and frozen for this simulation.`);
+        const count = request.volatileMacros.size;
+        warnings.push(count === 1
+            ? '1 changing macro value, such as random or time, was evaluated once and kept fixed for this scan.'
+            : `${count} changing macro values, such as random or time, were evaluated once and kept fixed for this scan.`);
     }
     const fingerprintSource = {
         seed: request.seed,

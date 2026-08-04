@@ -114,14 +114,14 @@ export async function buildSimulationRequest(snapshot, options = {}) {
     const maxContext = Math.max(1, Number(options.maxContext ?? promptLimit ?? context?.maxContext ?? 4096));
     const warnings = [...snapshot.warnings];
     if (mode === 'chat') {
-        warnings.push('Current-chat input is reconstructed and may differ from generation-time regex, OOC, attachment, reasoning, or supplemental-message processing.');
-        warnings.push('The configured prompt-token ceiling is used; provider negotiation or CFG can reduce the native generation budget.');
+        warnings.push('This scan uses the saved chat. An actual reply may see different text after regex scripts, OOC handling, attachments, reasoning, or other prompt processing.');
+        warnings.push('An actual reply may have less prompt space than this scan because model-provider and CFG settings can change the final token limit.');
     }
     if (injections.length) {
-        warnings.push('Scan-enabled extension prompts use their visible values; generation-time prompt filtering is not available.');
+        warnings.push('Extension prompts marked for lorebook scanning are included as shown. Filtering that happens only while generating a reply is not reproduced.');
     }
     if (snapshot.entries.some(entry => entry.vectorized)) {
-        warnings.push('Vector similarity is not simulated. Supply explicit forced entry IDs when testing vector-selected entries.');
+        warnings.push('Vector matching is not simulated, so entries selected only by vector similarity may be missing from these results.');
     }
     return {
         mode,

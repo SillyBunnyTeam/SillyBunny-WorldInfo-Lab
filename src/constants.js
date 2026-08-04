@@ -45,14 +45,14 @@ export const POSITION = Object.freeze({
 });
 
 export const POSITION_LABEL = Object.freeze({
-    [POSITION.before]: 'Before character',
-    [POSITION.after]: 'After character',
-    [POSITION.ANTop]: 'Author note top',
-    [POSITION.ANBottom]: 'Author note bottom',
-    [POSITION.atDepth]: 'At depth',
-    [POSITION.EMTop]: 'Examples top',
-    [POSITION.EMBottom]: 'Examples bottom',
-    [POSITION.outlet]: 'Outlet',
+    [POSITION.before]: 'Before character definition',
+    [POSITION.after]: 'After character definition',
+    [POSITION.ANTop]: "Author's Note, top",
+    [POSITION.ANBottom]: "Author's Note, bottom",
+    [POSITION.atDepth]: 'At chat depth',
+    [POSITION.EMTop]: 'Example messages, top',
+    [POSITION.EMBottom]: 'Example messages, bottom',
+    [POSITION.outlet]: 'Named outlet',
 });
 
 export const SOURCE_STRATEGY = Object.freeze({

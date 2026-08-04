@@ -7,16 +7,16 @@ async function openWorkbench(page) {
     await expect(page.locator('#sbwil-workbench')).toBeVisible();
 }
 
-test('runs a simulation and renders trace stages', async ({ page }) => {
+test('runs a scan and renders clear trace stages', async ({ page }) => {
     await openWorkbench(page);
     await expect(page.getByLabel('Text to scan')).toBeHidden();
-    await expect(page.getByRole('button', { name: 'Cancel run' })).toBeHidden();
-    await page.getByRole('button', { name: 'Run simulation' }).click();
-    await expect(page.getByText('Simulation complete. 2 entries activated.')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Cancel scan' })).toBeHidden();
+    await page.getByRole('button', { name: 'Run scan' }).click();
+    await expect(page.getByText('Scan complete: 2 entries activated.')).toBeVisible();
     await expect(page.locator('.sbwil-activated-list').getByText('Dragon fact')).toBeVisible();
     await page.getByRole('tab', { name: 'Trace' }).click();
     await expect(page.getByRole('heading', { name: 'Why each entry did or did not activate' })).toBeVisible();
-    await expect(page.getByText('Round 2: Recursion')).toBeVisible();
+    await expect(page.getByText('Round 2: Recursive scan')).toBeVisible();
 });
 
 test('mounts dedupe-safe settings and exposes batch field mode', async ({ page }) => {
@@ -25,18 +25,64 @@ test('mounts dedupe-safe settings and exposes batch field mode', async ({ page }
     await expect(settings).toHaveClass(/extension_container/);
     await expect(settings).toHaveAttribute('data-extension-name', 'SillyBunny-WorldInfo-Lab');
     await page.getByRole('tab', { name: 'Batch Edit' }).click();
-    await page.getByLabel('Batch operation').selectOption('set-field');
-    await expect(page.getByLabel('Activation field')).toBeVisible();
-    await expect(page.getByLabel('New field value')).toBeVisible();
+    await page.getByLabel('Edit type').selectOption('set-field');
+    await expect(page.getByLabel('Entry setting')).toBeVisible();
+    await expect(page.getByLabel('New setting value')).toBeVisible();
+});
+
+test('aligns the saved-test form as one clear action flow', async ({ page }) => {
+    await openWorkbench(page);
+    await page.getByRole('tab', { name: 'Saved Tests' }).click();
+    const form = page.locator('.sbwil-saved-test-form');
+    await expect(form).toBeVisible();
+
+    const layout = await form.evaluate((node) => {
+        const box = (selector) => node.querySelector(selector).getBoundingClientRect();
+        const name = box('.sbwil-test-name');
+        const book = box('.sbwil-test-book');
+        const consent = box('.sbwil-test-consent');
+        const details = box('.sbwil-privacy-details');
+        const actions = box('.sbwil-form-actions');
+        return {
+            fieldTopDifference: Math.abs(name.top - book.top),
+            consentStartsAtForm: Math.abs(consent.left - node.getBoundingClientRect().left),
+            detailsStartsAtForm: Math.abs(details.left - node.getBoundingClientRect().left),
+            actionStartsAtForm: Math.abs(actions.left - node.getBoundingClientRect().left),
+            consentBelowFields: consent.top >= Math.max(name.bottom, book.bottom),
+        };
+    });
+    expect(layout.fieldTopDifference).toBeLessThanOrEqual(1);
+    expect(layout.consentStartsAtForm).toBeLessThanOrEqual(1);
+    expect(layout.detailsStartsAtForm).toBeLessThanOrEqual(1);
+    expect(layout.actionStartsAtForm).toBeLessThanOrEqual(1);
+    expect(layout.consentBelowFields).toBe(true);
+});
+
+test('uses named batch choices and invalidates an edited preview', async ({ page }) => {
+    await openWorkbench(page);
+    await page.getByRole('tab', { name: 'Batch Edit' }).click();
+    await page.getByLabel('Edit type').selectOption('set-field');
+    await page.getByLabel('Entry setting').selectOption('position');
+    const value = page.getByLabel('New setting value');
+    await expect(value.locator('option[value="4"]')).toHaveText('At chat depth');
+    await value.selectOption('4');
+    await page.getByRole('button', { name: 'Preview changes' }).click();
+    await expect(page.getByText(/entry would change/)).toBeVisible();
+    await page.locator('.sbwil-approval input').check();
+    await expect(page.getByRole('button', { name: 'Save these changes to the lorebook' })).toBeEnabled();
+
+    await value.selectOption('0');
+    await expect(page.getByText('Edit settings changed. Select Preview changes again before saving.')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Save these changes to the lorebook' })).toBeDisabled();
 });
 
 test('invalidates results on message edits and tears down through the extension lifecycle', async ({ page }) => {
     await openWorkbench(page);
-    await page.getByRole('button', { name: 'Run simulation' }).click();
-    await expect(page.getByText('Simulation complete. 2 entries activated.')).toBeVisible();
+    await page.getByRole('button', { name: 'Run scan' }).click();
+    await expect(page.getByText('Scan complete: 2 entries activated.')).toBeVisible();
     await page.evaluate(() => globalThis.fixtureEmit('message-edited'));
-    await expect(page.getByLabel('Simulation result').locator('.sbwil-stale-notice'))
-        .toContainText('scan input changed');
+    await expect(page.getByLabel('Scan results').locator('.sbwil-stale-notice'))
+        .toContainText('chat, character, group, persona, or character tags changed');
 
     await page.evaluate(() => globalThis.fixtureDeactivate());
     await expect(page.locator('#sbwil-menu-item')).toHaveCount(0);
@@ -46,55 +92,55 @@ test('invalidates results on message edits and tears down through the extension 
 
 test('invalidates results when character tag assignments change', async ({ page }) => {
     await openWorkbench(page);
-    await page.getByRole('button', { name: 'Run simulation' }).click();
-    await expect(page.getByText('Simulation complete. 2 entries activated.')).toBeVisible();
+    await page.getByRole('button', { name: 'Run scan' }).click();
+    await expect(page.getByText('Scan complete: 2 entries activated.')).toBeVisible();
     await page.evaluate(async () => {
         globalThis.fixtureSetTagMap({ tester: ['tag-1'] });
         await globalThis.fixtureEmit('settings-updated');
     });
-    await expect(page.getByLabel('Simulation result').locator('.sbwil-stale-notice'))
-        .toContainText('scan input changed');
+    await expect(page.getByLabel('Scan results').locator('.sbwil-stale-notice'))
+        .toContainText('chat, character, group, persona, or character tags changed');
 });
 
 test('invalidates local control changes and cancels in-flight scans', async ({ page }) => {
     await openWorkbench(page);
-    await page.getByRole('button', { name: 'Run simulation' }).click();
-    await expect(page.getByText('Simulation complete. 2 entries activated.')).toBeVisible();
-    await page.getByLabel('Generation trigger').selectOption('swipe');
-    await expect(page.getByLabel('Simulation result').locator('.sbwil-stale-notice'))
-        .toContainText('Scan controls changed');
+    await page.getByRole('button', { name: 'Run scan' }).click();
+    await expect(page.getByText('Scan complete: 2 entries activated.')).toBeVisible();
+    await page.getByLabel('Reply action to simulate').selectOption('swipe');
+    await expect(page.getByLabel('Scan results').locator('.sbwil-stale-notice'))
+        .toContainText('scan option changed');
 
     await page.getByRole('radio', { name: 'Pasted text' }).check();
     await page.getByLabel('Text to scan').fill('dragon');
     await page.evaluate(() => globalThis.fixtureSetLoadDelay(200));
-    await page.getByRole('button', { name: 'Run simulation' }).click();
-    await expect(page.getByRole('button', { name: 'Cancel run' })).toBeVisible();
+    await page.getByRole('button', { name: 'Run scan' }).click();
+    await expect(page.getByRole('button', { name: 'Cancel scan' })).toBeVisible();
     await page.getByLabel('Text to scan').fill('dragon changed');
-    await expect(page.getByText('Inputs changed. Run the simulation again.')).toBeVisible();
+    await expect(page.getByText('Scan input changed. Run the scan again.')).toBeVisible();
     await page.waitForTimeout(250);
-    await expect(page.getByText('Simulation complete. 2 entries activated.')).toHaveCount(0);
+    await expect(page.getByText('Scan complete: 2 entries activated.')).toHaveCount(0);
 });
 
 test('does not publish a stored-case result after source invalidation', async ({ page }) => {
     await openWorkbench(page);
-    await page.getByRole('button', { name: 'Run simulation' }).click();
-    await expect(page.getByText('Simulation complete. 2 entries activated.')).toBeVisible();
-    await page.getByRole('tab', { name: 'Tests' }).click();
-    await expect(page.getByRole('heading', { name: 'Regression tests' })).toBeVisible();
-    await page.getByLabel('Name').fill('Fixture replay');
-    await page.getByText('Store replay data in this lorebook').click();
-    await page.getByRole('button', { name: 'Save latest result' }).click();
-    await expect(page.getByText('Test case saved.')).toBeVisible();
+    await page.getByRole('button', { name: 'Run scan' }).click();
+    await expect(page.getByText('Scan complete: 2 entries activated.')).toBeVisible();
+    await page.getByRole('tab', { name: 'Saved Tests' }).click();
+    await expect(page.getByRole('heading', { name: 'Saved scan tests' })).toBeVisible();
+    await page.getByLabel('Test name').fill('Fixture replay');
+    await page.locator('.sbwil-test-consent input').check();
+    await page.getByRole('button', { name: 'Save displayed scan as test' }).click();
+    await expect(page.getByText('Saved test "Fixture replay" to "Fixture Book".')).toBeVisible();
 
     await page.evaluate(() => globalThis.fixtureSetLoadDelay(200));
-    await page.getByRole('button', { name: 'Run selected' }).click();
-    await expect(page.getByText('Running Fixture replay...')).toBeVisible();
+    await page.getByRole('button', { name: 'Run selected test' }).click();
+    await expect(page.getByText('Running saved test "Fixture replay"...')).toBeVisible();
     await page.evaluate(() => globalThis.fixtureEmit('worldinfo-updated'));
-    await expect(page.getByText('Stored test case run cancelled because scan inputs changed.')).toBeVisible();
+    await expect(page.getByText('Saved test canceled because the chat or lorebooks changed. Run it again.')).toBeVisible();
     await page.waitForTimeout(250);
     await page.getByRole('tab', { name: 'Scan' }).click();
-    await expect(page.getByLabel('Simulation result').locator('.sbwil-stale-notice'))
-        .toContainText('World Info sources changed');
+    await expect(page.getByLabel('Scan results').locator('.sbwil-stale-notice'))
+        .toContainText('lorebook or its settings changed');
 });
 
 test('keeps primary controls usable at mobile width', async ({ page }) => {
@@ -102,7 +148,7 @@ test('keeps primary controls usable at mobile width', async ({ page }) => {
     await openWorkbench(page);
     await expect(page.getByRole('tab', { name: 'Scan' })).toBeVisible();
     await expect(page.getByRole('tab', { name: 'Batch Edit' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Run simulation' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Run scan' })).toBeVisible();
     await page.getByRole('radio', { name: 'Pasted text' }).check();
     await expect(page.locator('#sbwil-pasted-text')).toBeVisible();
     await page.getByRole('radio', { name: 'Current chat' }).check();
