@@ -169,11 +169,12 @@ export function mountRuntimeUi({ signal = null } = {}) {
         }
         document.getElementById('sbwil-menu-item')?.remove();
 
-        menuItem = element('button', {
+        // Wand entries must be divs: the host styles them via
+        // `#extensionsMenu > div`, and a <button> falls back to browser chrome.
+        menuItem = element('div', {
             id: 'sbwil-menu-item',
             className: 'list-group-item flex-container flexGap5 interactable sbwil-menu-item',
             attributes: {
-                type: 'button',
                 title: 'Open World Info Lab to test lorebook activation',
             },
         });

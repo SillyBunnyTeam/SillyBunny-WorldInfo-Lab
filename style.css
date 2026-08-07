@@ -27,15 +27,6 @@
     display: none !important;
 }
 
-#sbwil-menu-item {
-    align-items: center;
-    gap: 8px;
-    min-height: 36px;
-    border: 0;
-    font: inherit;
-    text-align: left;
-}
-
 .sbwil-menu-icon {
     width: 1.25em;
     text-align: center;
@@ -1075,7 +1066,6 @@
 }
 
 @media (hover: hover) {
-    #sbwil-menu-item:hover,
     .sbwil-tab:hover,
     #sbwil-workbench .sbwil-button:hover:not(:disabled),
     #sbwil-settings .sbwil-button:hover:not(:disabled) {
@@ -1260,7 +1250,6 @@
 }
 
 @media (pointer: coarse) {
-    #sbwil-menu-item,
     #sbwil-settings summary,
     #sbwil-settings button,
     #sbwil-settings input,
